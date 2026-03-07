@@ -2,6 +2,8 @@
 
 Introducing the Croquet-TeaTime-inspired, Renkon-driven collaborative computational engine (**WIP**)
 
+#### Live demo (https://renkon.krestianstvo.org)
+
 ![](/public/doc/vm.jpg)
 
 
@@ -25,7 +27,9 @@ npm install
 npm start
 ```
 
-Open web browser: http://localhost:3000
+Open web browser:   
+http://localhost:3000 - for running tests.    
+http://localhost:3000/demo.html - for demo app.  
 
 
 Learn more about:  
