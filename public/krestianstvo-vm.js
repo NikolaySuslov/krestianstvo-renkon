@@ -230,78 +230,81 @@ function buildModelPreamble(applyActionBody) {
         '    return state;\n' +
         '};';
 
-    return (
-'const app             = Renkon.app;\n' +
-'const _initialObjects = app.initialObjects || {};\n' +
-'const _initialState   = app.initialState   || {};\n' +
-'\n' +
-'const _raw = Events.receiver({ queued: true });\n' +
-'\n' +
-'const _pendingFutures = [];\n' +
-xoroshiroSeedSrc + '\n' +
-xoroshiroNextSrc + '\n' +
-'const _rngRef = (_initialState._rngState\n' +
-'    ? [..._initialState._rngState]\n' +
-'    : _xoroshiroSeed(_initialState.seed || 1));\n' +
-'\n' +
-'const random = () => _xoroshiroNext(_rngRef);\n' +
-'\n' +
-futureSrc + '\n' +
-'\n' +
-applyActionSrc + '\n' +
-'\n' +
-enqueueSrc + '\n' +
-'\n' +
-drainSrc + '\n' +
-'\n' +
-'const incoming = _raw;\n' +
-'const worldState = Behaviors.collect(\n' +
-'    { time: app.initialTime || 0, queue: (_initialState.queue) || [],\n' +
-'      objects: _initialObjects, spawned: (_initialState.spawned) || [],\n' +
-'      ticking: (_initialState.ticking || false),\n' +
-'      windows: (_initialState.windows || {}),\n' +
-'      seed: (_initialState.seed) || 0,\n' +
-'      _rngState: _initialState._rngState || _xoroshiroSeed(_initialState.seed || 1) },\n' +
-'    Events.or(incoming, Events.change($worldState)),\n' +
-'    (state, ev) => {\n' +
-'        if (!ev) return state;\n' +
-'        if (ev.time !== undefined && ev.queue !== undefined) {\n' +
-'            var drained = _drain(state);\n' +
-'            return drained === state ? state : drained;\n' +
-'        }\n' +
-'        var msgs = Array.isArray(ev) ? ev : [ev];\n' +
-'        return msgs.reduce(function(s, m) { return _enqueue(s, m); }, state);\n' +
-'    }\n' +
-');\n' +
-'\n' +
-// vTime — virtual clock extracted from worldState
-'const vTime = Behaviors.collect(0, Events.change($worldState), (_, s) => s ? s.time : 0);\n' +
-'\n' +
-// Push objects+vTime to viewPS on every worldState change
-'Behaviors.collect(null, Events.change($worldState), function(prev, s) {\n' +
-'    const _vps = app.viewPS;\n' +
-'    if (_vps && s) {\n' +
-'        //console.log("[wsChange] t=" + s.time + " ticking=" + s.ticking + " qlen=" + s.queue.length);\n' +
-'        _vps.registerEvent("objects", s.objects);\n' +
-'        _vps.registerEvent("vTime",   s.time);\n' +
+    // _src(fn): extract function body as a source string for inline Renkon node definitions.
+    // Strips the outer `function() { ... }` wrapper — what remains is pasted verbatim.
+    const _src = fn => fn.toString().replace(/^[^{]*\{/, '').replace(/\s*\}\s*$/, '');
 
-'        const prevWins = prev && prev.windows;\n' +
-'        if (s.windows && s.windows !== prevWins) {\n' +
-'            Object.entries(s.windows).forEach(function(e) {\n' +
-'                _vps.registerEvent("_moveWindow", { name: e[0], x: (e[1].x||0), y: (e[1].y||0) });\n' +
-'            });\n' +
-'        }\n' +
-'        var _keys = app.viewStateKeys || [];\n' +
-'        for (var _ki = 0; _ki < _keys.length; _ki++) {\n' +
-'            var _k = _keys[_ki];\n' +
-'            if (s[_k] !== (prev && prev[_k]))\n' +
-'                _vps.registerEvent(_k, s[_k]);\n' +
-'        }\n' +
-'    }\n' +
-'    return s;\n' +
-'});\n' +
-'\n'
-    );
+    const worldStateSrc = _src(function() {
+const incoming = _raw;
+const worldState = Behaviors.collect(
+    { time:      app.initialTime || 0,
+      queue:     _initialState.queue    || [],
+      objects:   _initialObjects,
+      spawned:   _initialState.spawned  || [],
+      ticking:   _initialState.ticking  || false,
+      windows:   _initialState.windows  || {},
+      seed:      _initialState.seed     || 0,
+      _rngState: _initialState._rngState || _xoroshiroSeed(_initialState.seed || 1) },
+    Events.or(incoming, Events.change($worldState)),
+    (state, ev) => {
+        if (!ev) return state;
+        if (ev.time !== undefined && ev.queue !== undefined) {
+            var drained = _drain(state);
+            return drained === state ? state : drained;
+        }
+        var msgs = Array.isArray(ev) ? ev : [ev];
+        return msgs.reduce(function(s, m) { return _enqueue(s, m); }, state);
+    }
+);
+    });
+
+    const vTimeSrc = _src(function() {
+const vTime = Behaviors.collect(0, Events.change($worldState), (_, s) => s ? s.time : 0);
+    });
+
+    const viewPusherSrc = _src(function() {
+Behaviors.collect(null, Events.change($worldState), function(prev, s) {
+    const _vps = app.viewPS;
+    if (_vps && s) {
+        console.log("[wsChange] t=" + s.time + " ticking=" + s.ticking + " qlen=" + s.queue.length);
+        _vps.registerEvent("objects", s.objects);
+        _vps.registerEvent("vTime",   s.time);
+        const prevWins = prev && prev.windows;
+        if (s.windows && s.windows !== prevWins) {
+            Object.entries(s.windows).forEach(function(e) {
+                _vps.registerEvent("_moveWindow", { name: e[0], x: (e[1].x||0), y: (e[1].y||0) });
+            });
+        }
+        var _keys = app.viewStateKeys || [];
+        for (var _ki = 0; _ki < _keys.length; _ki++) {
+            var _k = _keys[_ki];
+            if (s[_k] !== (prev && prev[_k]))
+                _vps.registerEvent(_k, s[_k]);
+        }
+    }
+    return s;
+});
+    });
+
+    return [
+        'const app             = Renkon.app;',
+        'const _initialObjects = app.initialObjects || {};',
+        'const _initialState   = app.initialState   || {};',
+        'const _raw            = Events.receiver({ queued: true });',
+        'const _pendingFutures = [];',
+        xoroshiroSeedSrc,
+        xoroshiroNextSrc,
+        'const _rngRef = _initialState._rngState ? [..._initialState._rngState] : _xoroshiroSeed(_initialState.seed || 1);',
+        'const random = () => _xoroshiroNext(_rngRef);',
+        futureSrc,
+        applyActionSrc,
+        enqueueSrc,
+        drainSrc,
+        worldStateSrc,
+        vTimeSrc,
+        viewPusherSrc,
+        '',
+    ].join('\n');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -309,16 +312,20 @@ drainSrc + '\n' +
 // ═══════════════════════════════════════════════════════════════════════════
 // Standard receptors that the view always gets for free.
 
-const VIEW_PREAMBLE =
-'const clientIdentity  = Behaviors.collect({clientId:null,seloId:null}, Events.receiver(), function(_,id){return id;});\n' +
-'const objects         = Behaviors.collect({}, Events.receiver(), function(_,v){return v;});\n' +
-'const vTime           = Behaviors.collect(0,  Events.receiver(), function(_,v){return v;});\n' +
-'const randomResult    = Behaviors.collect(null, Events.receiver(), function(_,v){return v;});\n' +
-'const _modelTicking   = Behaviors.collect(null, Events.receiver(), function(_,v){return v;});\n' +
-'const myObject = Behaviors.collect(null, Events.change($objects), function(_, objs) {\n' +
-'    const id = clientIdentity && clientIdentity.clientId;\n' +
-'    return id ? ((objs && objs[id]) || null) : null;\n' +
-'});\n';
+// _src: extract the body of a wrapper function as a literal string for Renkon node definitions.
+const _viewSrc = fn => fn.toString().replace(/^[^{]*\{/, '').replace(/\s*\}\s*$/, '');
+
+const VIEW_PREAMBLE = _viewSrc(function() {
+const clientIdentity = Behaviors.collect({clientId:null,seloId:null}, Events.receiver(), function(_,id){return id;});
+const objects        = Behaviors.collect({},   Events.receiver(), function(_,v){return v;});
+const vTime          = Behaviors.collect(0,    Events.receiver(), function(_,v){return v;});
+const randomResult   = Behaviors.collect(null, Events.receiver(), function(_,v){return v;});
+const _modelTicking  = Behaviors.collect(null, Events.receiver(), function(_,v){return v;});
+const myObject = Behaviors.collect(null, Events.change($objects), function(_, objs) {
+    const id = clientIdentity && clientIdentity.clientId;
+    return id ? ((objs && objs[id]) || null) : null;
+});
+}) + '\n';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // KrestianstvoVM
