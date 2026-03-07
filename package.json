@@ -1,0 +1,13 @@
+{
+  "name": "krestianstvo-renkon",
+  "version": "0.0.1",
+  "main": "reflector.js",
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.13.0",
+    "renkon-core": "0.10.7"
+  },
+  "scripts": {
+    "start": "node reflector.js"
+  }
+}

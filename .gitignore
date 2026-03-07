@@ -1,0 +1,6 @@
+NODE_MODULES/
+dist/
+build/
+.DS_Store
+*.log
+*.env
