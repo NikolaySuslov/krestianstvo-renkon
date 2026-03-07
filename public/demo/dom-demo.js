@@ -90,11 +90,16 @@ const _clickDoc = Events.listener(document, 'mousemove', function(e) {
     var rect = rEl.getBoundingClientRect();
     return { x: Math.round(e.clientX - rect.left), y: Math.round(e.clientY - rect.top) };
 });
-const _sendMove = Behaviors.collect(null, _clickDoc, function(_, pos) {
+
+// Throttle mousemove to 10fps — we don't want to flood the model with every pixel of movement.
+const _timerMove = Events.timer(100);
+const _mouseCoords = {t: _timerMove, e: _clickDoc};
+
+const _sendMove = Behaviors.collect(null, _mouseCoords, function(_, pos) {
     if (!pos) return null;
     var ws = Renkon.app.ws;
     if (ws && ws.readyState === WebSocket.OPEN)
-        ws.send(JSON.stringify({ type: '_move', data: pos }));
+        ws.send(JSON.stringify({ type: '_move', data: pos.e }));
     return null;
 });
 
