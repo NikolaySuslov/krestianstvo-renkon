@@ -409,49 +409,54 @@ class KrestianstvoVM {
     // ── _buildMetaProgram ─────────────────────────────────────────────────
     // The Renkon source that IS the VM. All protocol logic lives here as FRP.
     _buildMetaProgram() {
-        return (
-'const wsMessages = Events.next(Renkon.app.wsStream);\n' +
-'const wsMsg = Behaviors.collect(null, wsMessages, function(_, res) {\n' +
-'    return (res && !res.done) ? res.value : null;\n' +
-'});\n' +
+        // _src: extract function body as a literal string for Renkon node definitions.
+        const _src = fn => fn.toString().replace(/^[^{]*\{/, '').replace(/\s*\}\s*$/, '');
 
-// Protocol FSM — all imperative work delegated to vm methods,
-// no sandbox globals (no Date, Math, queueMicrotask) in the string.
-'const seloState = Behaviors.collect(\n' +
-'    { phase: null, clientId: null, buffer: [] },\n' +
-'    Events.change($wsMsg),\n' +
-'    function(state, msg) {\n' +
-'        if (!msg) return state;\n' +
-'        var vm = Renkon.app.vm;\n' +
-'        if (msg.type === "selo_joined")                              return vm._onSeloJoined(state, msg);\n' +
-'        if (msg.type === "snapshot_apply" && state.phase === "buffering") return vm._onSnapshotApply(state, msg);\n' +
-'        if (state.phase === "buffering") return { phase: "buffering", clientId: state.clientId, buffer: state.buffer.concat([msg]) };\n' +
-'        if (state.phase === "live")      return vm._onLiveMsg(state, msg);\n' +
-'        return state;\n' +
-'    }\n' +
-');\n' +
+        return _src(function() {
+// Raw WS stream — async generator fed by the WebSocket
+const wsMessages = Events.next(Renkon.app.wsStream);
+const wsMsg = Behaviors.collect(null, wsMessages, function(_, res) {
+    return (res && !res.done) ? res.value : null;
+});
 
-// _spawned: event pushed by _drain when worldState.spawned changes
-'const _spawned = Events.receiver({ queued: true });\n' +
-// spawnedNames — updated from _spawned events pushed by model _drain
-'const spawnedNames = Behaviors.collect(\n' +
-'    [],\n' +
-'    _spawned,\n' +
-'    function(prev, namesOrArr) {\n' +
-'        if (!namesOrArr) return prev;\n' +
-'        var arr = Array.isArray(namesOrArr) ? namesOrArr[namesOrArr.length - 1] : namesOrArr;\n' +
-'        if (!arr) return prev;\n' +
-'        return Array.isArray(arr) ? arr : [arr];\n' +
-'    }\n' +
-');\n' +
+// Protocol FSM — all imperative work delegated to vm methods;
+// no sandbox globals (no Date, Math, queueMicrotask) inside this string.
+const seloState = Behaviors.collect(
+    { phase: null, clientId: null, buffer: [] },
+    Events.change($wsMsg),
+    function(state, msg) {
+        if (!msg) return state;
+        var vm = Renkon.app.vm;
+        if (msg.type === "selo_joined")                                   return vm._onSeloJoined(state, msg);
+        if (msg.type === "snapshot_apply" && state.phase === "buffering") return vm._onSnapshotApply(state, msg);
+        if (state.phase === "buffering") return { phase: "buffering", clientId: state.clientId, buffer: state.buffer.concat([msg]) };
+        if (state.phase === "live")      return vm._onLiveMsg(state, msg);
+        return state;
+    }
+);
 
-// children$ — Map<name,KrestianstvoVM> reactive collection
-'const children$ = Behaviors.collect(\n' +
-'    new Map(),\n' +
-'    Events.change($spawnedNames),\n' +
-'    function(prev, names) { return Renkon.app.vm._diffChildren(prev, names); }\n' +
-');\n'
-        );
+// _spawned: event receiver pushed by _drain when worldState.spawned changes
+const _spawned = Events.receiver({ queued: true });
+
+// spawnedNames — latest spawned array, updated from _spawned events
+const spawnedNames = Behaviors.collect(
+    [],
+    _spawned,
+    function(prev, namesOrArr) {
+        if (!namesOrArr) return prev;
+        var arr = Array.isArray(namesOrArr) ? namesOrArr[namesOrArr.length - 1] : namesOrArr;
+        if (!arr) return prev;
+        return Array.isArray(arr) ? arr : [arr];
+    }
+);
+
+// children$ — reactive Map<name, KrestianstvoVM> managed by _diffChildren
+const children$ = Behaviors.collect(
+    new Map(),
+    Events.change($spawnedNames),
+    function(prev, names) { return Renkon.app.vm._diffChildren(prev, names); }
+);
+        }) + '\n';
     }
 
     // _onSeloJoined — called from seloState reducer
