@@ -31,8 +31,12 @@ Open web browser:
 http://localhost:3000 - for running tests.    
 http://localhost:3000/demo.html - for demo app.  
 
+URL params for demo page:   
+- ?k=seloName — selo id  
+- ?r=http://host:port  — reflector base url
 
-Learn more about:  
+
+### Learn more about:  
 
 * [**Krestianstvo SDK 4**](https://github.com/NikolaySuslov/krestianstvo-playground) - [https://play.krestianstvo.org](https://play.krestianstvo.org)
 * [**Croquet VM**](https://github.com/croquet/croquet) 
