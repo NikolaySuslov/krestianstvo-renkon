@@ -266,7 +266,7 @@ const vTime = Behaviors.collect(0, Events.change($worldState), (_, s) => s ? s.t
 Behaviors.collect(null, Events.change($worldState), function(prev, s) {
     const _vps = app.viewPS;
     if (_vps && s) {
-        console.log("[wsChange] t=" + s.time + " ticking=" + s.ticking + " qlen=" + s.queue.length);
+        //console.log("[wsChange] t=" + s.time + " ticking=" + s.ticking + " qlen=" + s.queue.length);
         _vps.registerEvent("objects", s.objects);
         _vps.registerEvent("vTime",   s.time);
         const prevWins = prev && prev.windows;
