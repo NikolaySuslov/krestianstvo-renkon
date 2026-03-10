@@ -10,9 +10,7 @@ export const APPLY_ACTION = `
             future(state.time, 1000, 'tick', {});
             for (var _i = 1; _i <= 9; _i++) future(state.time, _i * 100, 'subTick', { step: _i });
         }
-    
-        let r = random();
-        return Object.assign({}, state, { randomResult: r });
+        return Object.assign({}, state, { randomResult: random() });
     }
     if (msg.type === 'toggleTick') {
         var _nowTicking = !state.ticking;
@@ -65,6 +63,11 @@ export const APPLY_ACTION = `
 // ── MODEL_PROGRAM ─────────────────────────────────────────────────────────
 // Renkon nodes inside model PS. _initialState provided by model preamble.
 export const MODEL_PROGRAM = `
+// App-level worldState projections — seeded from _initialState so snapshot restore reads correctly
+const ticking      = Behaviors.collect((_initialState && _initialState.ticking)      || false, Events.change($worldState), (_, s) => s ? s.ticking      : false);
+const windows      = Behaviors.collect((_initialState && _initialState.windows)      || {},    Events.change($worldState), (_, s) => s ? s.windows      : {});
+const randomResult = Behaviors.collect((_initialState && _initialState.randomResult) || null,  Events.change($worldState), (_, s) => s ? s.randomResult : null);
+
 const tick       = Events.receiver();
 const subTick    = Events.receiver();
 const counter    = Behaviors.collect(_initialState.counter    || 0, tick,    function(prev, _) { var n=prev+1; console.log('[MODEL counter]', n); return n; });
@@ -78,8 +81,12 @@ const subCounter = Behaviors.collect(_initialState.subCounter || 0, subTick, fun
 // Renkon.app provides: ws, depth, rootEl (set pre-start), UI (set pre-start)
 // _drain pushes: tick, subTick, toggleTick, setPortal, windowMoved, etc.
 export const VIEW_PROGRAM = `
-const counter         = Behaviors.collect(0,    Events.receiver(), function(_,v){return v||0;});
-const subCounter      = Behaviors.collect(0,    Events.receiver(), function(_,v){return v||0;});
+// App-level receivers — values pushed from model PS nodes via modelStateKeys
+const ticking      = Behaviors.collect(false, Events.receiver(), function(_,v){return v||false;});
+const windows      = Behaviors.collect({},    Events.receiver(), function(_,v){return v||{};});
+const randomResult = Behaviors.collect(null,  Events.receiver(), function(_,v){return v;});
+const counter      = Behaviors.collect(0,     Events.receiver(), function(_,v){return v||0;});
+const subCounter   = Behaviors.collect(0,     Events.receiver(), function(_,v){return v||0;});
 
 const _clickDoc = Events.listener(document, 'mousemove', function(e) {
     var rEl = Renkon.app.rootEl;
@@ -104,7 +111,6 @@ const _sendMove = Behaviors.collect(null, _mouseCoords, function(_, pos) {
 });
 
 const setPortal   = Events.receiver();
-const _moveWindow = Events.receiver();
 
 
 const portalText = Behaviors.collect('', setPortal,
@@ -119,7 +125,7 @@ const renderer = Behaviors.collect(null, renderTick, function(_, __) {
     var objs    = objects || {};
     var cnt     = counter    || 0;
     var sub     = subCounter || 0;
-    var running = (_modelTicking === true);
+    var running = (ticking === true);
     var myId    = clientIdentity && clientIdentity.clientId;
     var ws      = Renkon.app.ws;
     var depth   = Renkon.app.depth || 0;
@@ -200,12 +206,23 @@ const renderer = Behaviors.collect(null, renderTick, function(_, __) {
     return null;
 });
 
-const _winSync = Behaviors.collect(null, _moveWindow, function(_, ev) {
-    if (!ev || !ev.name) return null;
+const _winSync = Behaviors.collect(null, Events.change($windows), function(prev, wins) {
+    if (!wins) return prev;
+    // Only reposition if content actually changed (worldState changes create new objects on every tick)
+    var prevStr = prev && JSON.stringify(prev);
+    var nextStr = JSON.stringify(wins);
+    if (prevStr === nextStr) return prev;
     var app = Renkon.app;
-    app.windowPositions = app.windowPositions || {};
-    app.windowPositions[ev.name] = { x: ev.x || 0, y: ev.y || 0 };
-    return null;
+    app.windowPositions = wins;
+    // Apply positions to existing DOM elements
+    var rootEl = app.rootEl;
+    if (!rootEl) return wins;
+    Object.entries(wins).forEach(function(e) {
+        var name = e[0], pos = e[1];
+        var el = rootEl.querySelector('[data-selo-id="' + name + '"]');
+        if (el) { el.style.left = (pos.x || 0) + 'px'; el.style.top = (pos.y || 0) + 'px'; }
+    });
+    return wins;
 });
 `;
 
@@ -310,6 +327,15 @@ export function installDOMHandlers(vm, rootEl) {
             var el   = result.el;
             var cinp = result.cinp;
             var cbtn = result.cbtn;
+
+            // Apply saved position immediately if already known (e.g. from snapshot restore)
+            var savedPos = (parentVM.viewPS && parentVM.viewPS.app &&
+                            parentVM.viewPS.app.windowPositions &&
+                            parentVM.viewPS.app.windowPositions[name]);
+            if (savedPos) {
+                el.style.left = (savedPos.x || 0) + 'px';
+                el.style.top  = (savedPos.y || 0) + 'px';
+            }
 
             if (childVM.viewPS && childVM.viewPS.app) {
                 childVM.viewPS.app.rootEl = el;

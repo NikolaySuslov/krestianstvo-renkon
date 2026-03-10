@@ -53,6 +53,9 @@ import { MODEL_PROGRAM, VIEW_PROGRAM, APPLY_ACTION } from './tests.js';
 
     const vmA = new KrestianstvoVM({ seloId: 'test-selo' });
     const vmB = new KrestianstvoVM({ seloId: 'test-selo' });
+    const modelStateKeys = ['ticking', 'randomResult', 'counter', 'subCounter'];
+    vmA.modelStateKeys = modelStateKeys;
+    vmB.modelStateKeys = modelStateKeys;
 
     vmA.onSeloJoined = ev => uiLog('vmA joined ' + ev.seloId + ' as ' + ev.clientId, 'inf');
     vmB.onSeloJoined = ev => uiLog('vmB joined ' + ev.seloId + ' as ' + ev.clientId, 'inf');

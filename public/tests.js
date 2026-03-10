@@ -8,6 +8,7 @@
 //                    and any event type that drains (tick, toggleTick, spawnSelo, …)
 //   APPLY_ACTION   — JS function-body string extending the base applyAction(state, msg)
 //
+// No MODEL_NODES list needed — the model/view split is explicit in the source.
 // Cross-boundary communication:
 //   model → view: worldState changes push objects+vTime to viewPS automatically.
 //                 Any extra values can be pushed via registerEvent inside
@@ -53,10 +54,14 @@ const APPLY_ACTION = `
 // Declare extra derived model nodes here.
 
 const MODEL_PROGRAM = `
+// App-level worldState projections — seeded from _initialState so snapshot restore reads correctly
+const ticking      = Behaviors.collect((_initialState && _initialState.ticking)      || false, Events.change($worldState), (_, s) => s ? s.ticking      : false);
+const randomResult = Behaviors.collect((_initialState && _initialState.randomResult) || null,  Events.change($worldState), (_, s) => s ? s.randomResult : null);
+
 // tick: fires every 1000ms virtual (recursive future)
 const tick    = Events.receiver();
 const counter = Behaviors.collect(
-    _initialState?.counter ?? 0,
+    (_initialState && _initialState.counter) || 0,
     tick,
     (prev, _) => prev + 1
 );
@@ -65,7 +70,7 @@ const counter = Behaviors.collect(
 // All 9 drain in a single causality pass when the heartbeat advances time
 const subTick    = Events.receiver();
 const subCounter = Behaviors.collect(
-    _initialState?.subCounter ?? 0,
+    (_initialState && _initialState.subCounter) || 0,
     subTick,
     (prev, _) => prev + 1
 );
@@ -78,12 +83,13 @@ const subCounter = Behaviors.collect(
 // so you can listen to e.g. 'tick', 'toggleTick', 'spawnSelo' directly.
 
 const VIEW_PROGRAM = `
-// [TEST future] — tick + subTick counters
-   const tick       = Events.receiver();
-   const subTick    = Events.receiver();
-   const counter    = Behaviors.collect(0, tick,    (prev, _) => prev + 1);
-   const subCounter = Behaviors.collect(0, subTick, (prev, _) => prev + 1);
+// App-level receivers — values pushed from model PS nodes via modelStateKeys
+const ticking      = Behaviors.collect(false, Events.receiver(), function(_,v){return v||false;});
+const randomResult = Behaviors.collect(null,  Events.receiver(), function(_,v){return v;});
+const counter      = Behaviors.collect(0,     Events.receiver(), function(_,v){return v||0;});
+const subCounter   = Behaviors.collect(0,     Events.receiver(), function(_,v){return v||0;});
 
+// [TEST future] — counter + subCounter pushed via modelStateKeys
 const _logCounter = Behaviors.collect(null, Events.change($counter), (_, n) => {
     console.log('%c[TEST counter] counter=' + n, 'color:#0f8;font-weight:bold');
     return null;

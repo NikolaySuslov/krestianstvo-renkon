@@ -106,12 +106,10 @@ const _vm_drain = (s) => {
             app.metaPS.registerEvent('_spawned', next.spawned.slice());
         if (app.viewPS && msg.type !== 'spawnSelo') {
             app.viewPS.registerEvent(msg.type, val);
-            if (next.randomResult !== undefined && next.randomResult !== s.randomResult)
-                app.viewPS.registerEvent('randomResult', next.randomResult);
-            // Push ticking state change — viewPS 60hz evaluator picks it up
-            if (next.ticking !== s.ticking)
-                app.viewPS.registerEvent('_modelTicking', next.ticking);
-            // Push modelStateKeys — read from model PS nodes after drain
+            // Push objects + vTime directly from worldState — always current after drain
+            if (next.objects !== s.objects) app.viewPS.registerEvent('objects', next.objects);
+            if (next.time   !== s.time)    app.viewPS.registerEvent('vTime',   next.time);
+            // Push all modelStateKeys — read directly from model PS nodes after each drain step
             var _mkeys = app.modelStateKeys || [];
             var _mprev = app._modelStatePrev || {};
             for (var _mi = 0; _mi < _mkeys.length; _mi++) {
@@ -259,32 +257,12 @@ const worldState = Behaviors.collect(
     });
 
     const vTimeSrc = _src(function() {
-const vTime = Behaviors.collect(0, Events.change($worldState), (_, s) => s ? s.time : 0);
+// Core projections — seeded from _initialState so snapshot restore reads correctly
+const vTime   = Behaviors.collect((_initialState && _initialState.time)    || 0,  Events.change($worldState), (_, s) => s ? s.time    : 0);
+const objects = Behaviors.collect((_initialState && _initialState.objects) || {}, Events.change($worldState), (_, s) => s ? s.objects : {});
     });
 
-    const viewPusherSrc = _src(function() {
-Behaviors.collect(null, Events.change($worldState), function(prev, s) {
-    const _vps = app.viewPS;
-    if (_vps && s) {
-        //console.log("[wsChange] t=" + s.time + " ticking=" + s.ticking + " qlen=" + s.queue.length);
-        _vps.registerEvent("objects", s.objects);
-        _vps.registerEvent("vTime",   s.time);
-        const prevWins = prev && prev.windows;
-        if (s.windows && s.windows !== prevWins) {
-            Object.entries(s.windows).forEach(function(e) {
-                _vps.registerEvent("_moveWindow", { name: e[0], x: (e[1].x||0), y: (e[1].y||0) });
-            });
-        }
-        var _keys = app.viewStateKeys || [];
-        for (var _ki = 0; _ki < _keys.length; _ki++) {
-            var _k = _keys[_ki];
-            if (s[_k] !== (prev && prev[_k]))
-                _vps.registerEvent(_k, s[_k]);
-        }
-    }
-    return s;
-});
-    });
+
 
     return [
         'const app             = Renkon.app;',
@@ -302,7 +280,6 @@ Behaviors.collect(null, Events.change($worldState), function(prev, s) {
         drainSrc,
         worldStateSrc,
         vTimeSrc,
-        viewPusherSrc,
         '',
     ].join('\n');
 }
@@ -316,11 +293,10 @@ Behaviors.collect(null, Events.change($worldState), function(prev, s) {
 const _viewSrc = fn => fn.toString().replace(/^[^{]*\{/, '').replace(/\s*\}\s*$/, '');
 
 const VIEW_PREAMBLE = _viewSrc(function() {
+// Core receivers — always available, pushed by vm after every drain
 const clientIdentity = Behaviors.collect({clientId:null,seloId:null}, Events.receiver(), function(_,id){return id;});
 const objects        = Behaviors.collect({},   Events.receiver(), function(_,v){return v;});
 const vTime          = Behaviors.collect(0,    Events.receiver(), function(_,v){return v;});
-const randomResult   = Behaviors.collect(null, Events.receiver(), function(_,v){return v;});
-const _modelTicking  = Behaviors.collect(null, Events.receiver(), function(_,v){return v;});
 const myObject = Behaviors.collect(null, Events.change($objects), function(_, objs) {
     const id = clientIdentity && clientIdentity.clientId;
     return id ? ((objs && objs[id]) || null) : null;
@@ -338,8 +314,7 @@ class KrestianstvoVM {
         this.seloId       = seloId;
         this.depth        = depth;
         this.maxDepth     = maxDepth;
-        this.viewStateKeys  = [];  // worldState fields to forward to viewPS on change
-        this.modelStateKeys = [];  // model PS node names to include in snapshot + push to viewPS
+        this.modelStateKeys = [];  // model PS node names: included in snapshot, pushed to viewPS after drain
 
         this.ws      = null;
         this.ps      = null;      // meta ProgramState — VM as Renkon program
@@ -427,7 +402,7 @@ const seloState = Behaviors.collect(
     function(state, msg) {
         if (!msg) return state;
         var vm = Renkon.app.vm;
-        if (msg.type === "selo_joined")                                   return vm._onSeloJoined(state, msg);
+        if (msg.type === "selo_joined")                               return vm._onSeloJoined(state, msg);
         if (msg.type === "snapshot_apply" && state.phase === "buffering") return vm._onSnapshotApply(state, msg);
         if (state.phase === "buffering") return { phase: "buffering", clientId: state.clientId, buffer: state.buffer.concat([msg]) };
         if (state.phase === "live")      return vm._onLiveMsg(state, msg);
@@ -466,8 +441,8 @@ const children$ = Behaviors.collect(
             const seed = (Date.now() ^ (Math.random() * 0x100000000)) | 0;
             const selo = this._createModelSelo(0, {}, { seed });
             this.modelPS = selo.ps;
-            this.viewPS.registerEvent('objects', {});
-            this.viewPS.registerEvent('vTime', 0);
+            // Reset spawned children — new selo starts empty
+            this.ps.registerEvent('_spawned', []);
             this._sendJoin();
             if (this.onSeloJoined) this.onSeloJoined({ clientId: msg.clientId, seloId: msg.seloId });
             return { phase: 'live', clientId: msg.clientId, buffer: [], selo };
@@ -484,22 +459,13 @@ const children$ = Behaviors.collect(
         const selo = this._restoreModelSelo(snap);
         this.modelPS = selo.ps;
         selo.ps.evaluate(snap.time || 0);
+        // Push objects + vTime directly from snapshot — fundamental, always present
         this.viewPS.registerEvent('objects', snap.objects || {});
         this.viewPS.registerEvent('vTime',   snap.time   || 0);
-        if (snap.randomResult != null) this.viewPS.registerEvent('randomResult', snap.randomResult);
-        if (snap.ticking != null) this.viewPS.registerEvent('_modelTicking', snap.ticking);
-        (this.viewStateKeys || []).forEach(k => {
-            if (snap[k] != null) this.viewPS.registerEvent(k, snap[k]);
-        });
+        // Push all modelStateKeys to viewPS from snapshot — single uniform path
         (this.modelStateKeys || []).forEach(k => {
             if (snap[k] != null) this.viewPS.registerEvent(k, snap[k]);
         });
-        if (snap.windows) {
-            Object.entries(snap.windows).forEach(([name, pos]) => {
-                this.viewPS.registerEvent('_moveWindow', { name, x: pos.x || 0, y: pos.y || 0 });
-            });
-        }
-
         const buffered = state.buffer;
         // Replay buffered msgs after current call stack — Promise.resolve() is safe here
         // because it is called from real JS (this method), not from inside Renkon's eval.
@@ -510,19 +476,20 @@ const children$ = Behaviors.collect(
                         : bMsg.type === 'client_msg' ? ((bMsg.data && bMsg.data.serverTime) || 0) : 0;
                 if (t) { selo.ps.evaluate(t); selo.ps.evaluate(t); }
             }
-            const wss = this._getModelNode(selo.ps, 'worldState');
-            if (wss) {
-                this.viewPS.registerEvent('objects', wss.objects);
-                this.viewPS.registerEvent('vTime',   wss.time);
-            }
-            // Re-push modelStateKeys after replay — ensures view has correct values
+            // Re-push all modelStateKeys after replay — final authoritative values
             // even if drain pushed intermediate values during buffered replay
             var _self = this;
+            var _wss = _self._getModelNode(selo.ps, 'worldState');
+            if (_wss) {
+                _self.viewPS.registerEvent('objects', _wss.objects || {});
+                _self.viewPS.registerEvent('vTime',   _wss.time   || 0);
+            }
             (_self.modelStateKeys || []).forEach(function(k) {
                 var v = _self._getModelNode(selo.ps, k);
-                console.log('[POST_REPLAY push]', k, '=', v);
                 if (v !== undefined) _self.viewPS.registerEvent(k, v);
             });
+            // Reset children$ to snapshot's spawned list — clears stale children from previous selo
+            this.ps.registerEvent('_spawned', snap.spawned || []);
             this._sendJoin();
             (snap.spawned || []).forEach(name => this._emitSpawn(name));
         });
@@ -551,7 +518,6 @@ const children$ = Behaviors.collect(
             }
             const child = new KrestianstvoVM({ wsUrl: this.ws.url, seloId: name, depth: this.depth + 1, maxDepth: this.maxDepth });
             child.modelStateKeys = this.modelStateKeys || [];
-            child.viewStateKeys  = this.viewStateKeys  || [];
             child.onSpawn = this.onSpawn;
             child.onClose = this.onClose;
             child.start({ modelProgram: this._modelProgram, viewProgram: this._viewProgram, applyAction: this._applyAction });
@@ -608,20 +574,12 @@ const children$ = Behaviors.collect(
         selo.ps.evaluate(maxT);
         selo.ps.evaluate(maxT);
         wss = this._getModelNode(selo.ps, 'worldState') || wss;
-        var payload = {
-            time:         wss.time,
-            objects:      wss.objects,
-            queue:        wss.queue    || [],
-            spawned:      wss.spawned  || [],
-            ticking:      wss.ticking  || false,
-            windows:      wss.windows  || {},
-            seed:         wss.seed     || 0,
-            randomResult: wss.randomResult || null,
+        // Snapshot the full worldState — all fields preserved for joiner's _restoreModelSelo.
+        // modelStateKeys Renkon node values are added below (they may differ from worldState fields).
+        var payload = Object.assign({}, wss, {
             _rngState: wss._rngState ? wss._rngState.slice()
                                      : _vm_xoroshiroSeed(wss.seed || 1),
-        };
-        // Include user-declared viewStateKeys fields in snapshot
-        (this.viewStateKeys || []).forEach(k => { if (wss[k] != null) payload[k] = wss[k]; });
+        });
         // Include modelStateKeys — read directly from model PS nodes (like old vm's modelNodes)
         (this.modelStateKeys || []).forEach(k => {
             var v = this._getModelNode(selo.ps, k);
@@ -659,7 +617,6 @@ const children$ = Behaviors.collect(
             initialObjects:  initialObjects,
             initialState:    initialState,
             initialTime:     initialTime,
-            viewStateKeys:   this.viewStateKeys  || [],
             modelStateKeys:  this.modelStateKeys || [],
             _modelStatePrev: (function(keys, init) {
                 var p = {};

@@ -1,5 +1,5 @@
 import { KrestianstvoVM } from '../krestianstvo-vm.js';
-import { MODEL_PROGRAM, VIEW_PROGRAM, APPLY_ACTION, installDOMHandlers } from './dom-demo.js?v=25';
+import { MODEL_PROGRAM, VIEW_PROGRAM, APPLY_ACTION, installDOMHandlers } from './dom-demo.js';
 
 const cfg = { modelProgram: MODEL_PROGRAM, viewProgram: VIEW_PROGRAM, applyAction: APPLY_ACTION };
 
@@ -12,16 +12,15 @@ function parseUrlParams() {
     const seloId = p.get('k') || 'demo-main';
     let wsUrl = 'ws://localhost:3000';
     const r = p.get('r');
-    if (r) {
-        wsUrl = r.replace(/^https:\/\//, 'wss://').replace(/^http:\/\//, 'ws://');
-    }
+    if (r) wsUrl = r.replace(/^https:\/\//, 'wss://').replace(/^http:\/\//, 'ws://');
     return { seloId, wsUrl };
 }
 
 function bootVM(rootEl, seloId, wsUrl, delay) {
     setTimeout(() => {
         const vm = new KrestianstvoVM({ seloId, wsUrl });
-        vm.modelStateKeys = ['counter', 'subCounter'];
+        // All model state goes through modelStateKeys — uniform snapshot + viewPS push path
+        vm.modelStateKeys = ['ticking', 'windows', 'randomResult', 'counter', 'subCounter'];
         installDOMHandlers(vm, rootEl);
         vm.start(cfg);
     }, delay);
