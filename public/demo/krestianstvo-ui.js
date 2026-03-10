@@ -31,30 +31,53 @@ const KrestianstvoUI = (() => {
         _stylesInjected = true;
         const s = document.createElement('style');
         s.textContent = `
-.vm-root { position:absolute; inset:0; background:#f5f5f8; overflow:hidden; cursor:crosshair; outline:none; font-family:monospace; }
+.vm-root { position:absolute; inset:0; background:#f5f5f8; overflow:hidden; cursor:crosshair; outline:none; font-family:monospace; touch-action:none; }
 .avatar { position:absolute; width:36px; height:36px; border-radius:50%; border:3px solid #8899bb; background:#fff;
     display:flex; align-items:center; justify-content:center;
     font-size:9px; font-weight:bold; color:#334; text-align:center; line-height:1.1;
     pointer-events:none; }
+.vm-portal-bar { padding-bottom: max(5px, env(safe-area-inset-bottom)) !important; }
 `;
         document.head.appendChild(s);
     }
 
     function makeDraggable(el, handleEl, { onMove } = {}) {
         let ox = 0, oy = 0, mx = 0, my = 0, dragging = false;
-        handleEl.addEventListener('mousedown', e => {
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
-            dragging = true; mx = e.clientX; my = e.clientY;
+
+        function startDrag(cx, cy) {
+            dragging = true; mx = cx; my = cy;
             ox = parseInt(el.style.left) || 0; oy = parseInt(el.style.top) || 0;
-            e.stopPropagation(); e.preventDefault();
-        });
-        document.addEventListener('mousemove', e => {
+        }
+        function moveDrag(cx, cy) {
             if (!dragging) return;
-            const nx = ox + e.clientX - mx, ny = oy + e.clientY - my;
+            const nx = ox + cx - mx, ny = oy + cy - my;
             if (onMove) onMove(nx, ny);
             // Position is set by model confirmation (_winSync), not locally
+        }
+        function endDrag() { dragging = false; }
+
+        // Mouse
+        handleEl.addEventListener('mousedown', e => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
+            startDrag(e.clientX, e.clientY);
+            e.stopPropagation(); e.preventDefault();
         });
-        document.addEventListener('mouseup', () => { dragging = false; });
+        document.addEventListener('mousemove', e => moveDrag(e.clientX, e.clientY));
+        document.addEventListener('mouseup', endDrag);
+
+        // Touch
+        handleEl.addEventListener('touchstart', e => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
+            const t = e.touches[0];
+            startDrag(t.clientX, t.clientY);
+            e.stopPropagation(); e.preventDefault();
+        }, { passive: false });
+        handleEl.addEventListener('touchmove', e => {
+            const t = e.touches[0];
+            moveDrag(t.clientX, t.clientY);
+            e.preventDefault();
+        }, { passive: false });
+        handleEl.addEventListener('touchend', endDrag);
     }
 
     function tilePosition(parentEl, childW, childH, margin) {
@@ -96,7 +119,7 @@ const KrestianstvoUI = (() => {
         el.dataset.seloId = name;
         el.setAttribute('tabindex', '-1');
         el.style.cssText =
-            'position:absolute;left:20px;top:20px;' +
+            'position:absolute;left:20px;top:40px;' +
             'width:' + CHILD_W + 'px;height:' + CHILD_H + 'px;' +
             'background:rgba(250,250,254,0.80);backdrop-filter:blur(2px);' +
             'border:1.5px solid ' + C.border + ';' +

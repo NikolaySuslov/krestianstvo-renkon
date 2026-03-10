@@ -88,21 +88,32 @@ const randomResult = Behaviors.collect(null,  Events.receiver(), function(_,v){r
 const counter      = Behaviors.collect(0,     Events.receiver(), function(_,v){return v||0;});
 const subCounter   = Behaviors.collect(0,     Events.receiver(), function(_,v){return v||0;});
 
-const _clickDoc = Events.listener(document, 'mousemove', function(e) {
-    var rEl = Renkon.app.rootEl;
+function _clickHandler(e) {
+    var rEl = Renkon.app && Renkon.app.rootEl;
     if (!rEl || !rEl.contains(e.target)) return undefined;
     var hit = e.target.closest('[data-selo-id]');
     if (hit && hit !== rEl) return undefined;
     rEl.focus({ preventScroll: true });
     var rect = rEl.getBoundingClientRect();
-    return { x: Math.round(e.clientX - rect.left), y: Math.round(e.clientY - rect.top) };
-});
+    var cx = e.changedTouches ? e.changedTouches[0].clientX : e.clientX;
+    var cy = e.changedTouches ? e.changedTouches[0].clientY : e.clientY;
+    return { x: Math.round(cx - rect.left), y: Math.round(cy - rect.top) };
+}
+const _clickDoc = Events.or(
+    Events.listener(document, 'click',    _clickHandler),
+    Events.listener(document, 'touchstart', _clickHandler)
+);
+
+const _moveDoc = Events.or(
+    Events.listener(document, 'mousemove', _clickHandler),
+    Events.listener(document, 'touchmove', _clickHandler)
+);
 
 // Throttle mousemove to 10fps — we don't want to flood the model with every pixel of movement.
 const _timerMove = Events.timer(100);
-const _mouseCoords = {t: _timerMove, e: _clickDoc};
+const _mouseCoords = {t: _timerMove, e: _moveDoc};
 
-const _sendMove = Behaviors.collect(null, _mouseCoords, function(_, pos) {
+const _sendMove = Behaviors.collect(null, Events.or(_mouseCoords, _clickDoc), function(_, pos) {
     if (!pos) return null;
     var ws = Renkon.app.ws;
     if (ws && ws.readyState === WebSocket.OPEN)
@@ -186,7 +197,7 @@ const renderer = Behaviors.collect(null, renderTick, function(_, __) {
                                                  ((obj.y || 80) - 18) + 'px,0)';
         el.style.borderColor  = obj.color || '#8899bb';
         el.style.background   = 'rgba(255,255,255,0.90)';
-        el.style.opacity      = '0.80';
+        el.style.opacity      = '0.90';
         el.style.fontWeight   = id === myId ? 'bold' : 'normal';
         el.style.boxShadow    = id === myId
             ? '0 0 0 2px rgba(255,255,255,0.9),0 0 0 4px ' + (obj.color || '#8899bb') : 'none';
@@ -241,8 +252,9 @@ export function installDOMHandlers(vm, rootEl) {
     };
 
     // Track hover/click for Space key routing — plain JS, never inside Renkon sandbox
-    rootEl.addEventListener('mouseenter', function() { _activeWS = vm.ws; });
+    rootEl.addEventListener('mouseenter',  function() { _activeWS = vm.ws; });
     rootEl.addEventListener('mousedown',  function() { _activeWS = vm.ws; });
+    rootEl.addEventListener('touchstart', function() { _activeWS = vm.ws; }, { passive: true });
     _ensureSpaceListener();
 
     // Title strip with stats + join controls
