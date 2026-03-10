@@ -315,6 +315,7 @@ class KrestianstvoVM {
         this.depth        = depth;
         this.maxDepth     = maxDepth;
         this.modelStateKeys = [];  // model PS node names: included in snapshot, pushed to viewPS after drain
+        this.initialState   = {};  // app-supplied default world state for the first peer (joiners use snapshot)
 
         this.ws      = null;
         this.ps      = null;      // meta ProgramState — VM as Renkon program
@@ -439,7 +440,7 @@ const children$ = Behaviors.collect(
         this.viewPS.registerEvent('clientIdentity', { clientId: msg.clientId, seloId: msg.seloId });
         if (msg.clientsInSelo === 1) {
             const seed = (Date.now() ^ (Math.random() * 0x100000000)) | 0;
-            const selo = this._createModelSelo(0, {}, { seed });
+            const selo = this._createModelSelo(0, {}, Object.assign({}, this.initialState || {}, { seed }));
             this.modelPS = selo.ps;
             // Reset spawned children — new selo starts empty
             this.ps.registerEvent('_spawned', []);
@@ -596,6 +597,7 @@ const children$ = Behaviors.collect(
                   : ev.type === 'client_msg' ? ((ev.data && ev.data.serverTime) || 0) : 0;
             if (!psRef._ps) return;
             psRef._ps.registerEvent('_raw', ev);
+            
             //evaluate(t) call 1 → Events.next gets msg → _raw  → incoming → worldState enqueues
             //evaluate(t) call 2 → Events.change($worldState) → drain → msg processed
             psRef._ps.evaluate(t);

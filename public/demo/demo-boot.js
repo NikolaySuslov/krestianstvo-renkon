@@ -21,6 +21,8 @@ function bootVM(rootEl, seloId, wsUrl, delay) {
         const vm = new KrestianstvoVM({ seloId, wsUrl });
         // All model state goes through modelStateKeys — uniform snapshot + viewPS push path
         vm.modelStateKeys = ['ticking', 'windows', 'randomResult', 'counter', 'subCounter'];
+        // Default world state for the first peer — joiners restore from snapshot instead
+        // vm.initialState = { ticking: false, counter: 0 };  // example — omit to use defaults
         installDOMHandlers(vm, rootEl);
         vm.start(cfg);
     }, delay);
