@@ -51,8 +51,8 @@ const KrestianstvoUI = (() => {
         document.addEventListener('mousemove', e => {
             if (!dragging) return;
             const nx = ox + e.clientX - mx, ny = oy + e.clientY - my;
-            el.style.left = nx + 'px'; el.style.top = ny + 'px';
             if (onMove) onMove(nx, ny);
+            // Position is set by model confirmation (_winSync), not locally
         });
         document.addEventListener('mouseup', () => { dragging = false; });
     }
@@ -91,14 +91,12 @@ const KrestianstvoUI = (() => {
     function createSeloContainer(name, parentEl, opts) {
         opts = opts || {};
         const onMove = opts.onMove, onClose = opts.onClose;
-        const CHILD_W = 240, CHILD_H = 240;
-        const pos = tilePosition(parentEl, CHILD_W, CHILD_H);
-
+        const CHILD_W = 240, CHILD_H = 180;
         const el = document.createElement('div');
         el.dataset.seloId = name;
         el.setAttribute('tabindex', '-1');
         el.style.cssText =
-            'position:absolute;left:' + pos.x + 'px;top:' + pos.y + 'px;' +
+            'position:absolute;left:20px;top:20px;' +
             'width:' + CHILD_W + 'px;height:' + CHILD_H + 'px;' +
             'background:rgba(250,250,254,0.80);backdrop-filter:blur(2px);' +
             'border:1.5px solid ' + C.border + ';' +

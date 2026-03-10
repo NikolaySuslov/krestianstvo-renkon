@@ -193,36 +193,23 @@ const renderer = Behaviors.collect(null, renderTick, function(_, __) {
         el.textContent = 'T:' + cnt + ' S:' + sub;
     });
 
-    var wins = Renkon.app.windowPositions || {};
-    Object.keys(wins).forEach(function(name) {
-        var pos = wins[name];
-        var childEl = rEl.querySelector('[data-selo-id="' + name + '"]');
-        if (childEl) {
-            childEl.style.left = (pos.x || 0) + 'px';
-            childEl.style.top  = (pos.y || 0) + 'px';
-        }
-    });
-
     return null;
 });
 
-const _winSync = Behaviors.collect(null, Events.change($windows), function(prev, wins) {
-    if (!wins) return prev;
-    // Only reposition if content actually changed (worldState changes create new objects on every tick)
-    var prevStr = prev && JSON.stringify(prev);
-    var nextStr = JSON.stringify(wins);
-    if (prevStr === nextStr) return prev;
+const _winSync = Behaviors.collect(null, Events.change($windows), function(_, wins) {
+    if (!wins) return null;
     var app = Renkon.app;
     app.windowPositions = wins;
-    // Apply positions to existing DOM elements
+    // All clients including the dragger update position from model
     var rootEl = app.rootEl;
-    if (!rootEl) return wins;
-    Object.entries(wins).forEach(function(e) {
-        var name = e[0], pos = e[1];
-        var el = rootEl.querySelector('[data-selo-id="' + name + '"]');
-        if (el) { el.style.left = (pos.x || 0) + 'px'; el.style.top = (pos.y || 0) + 'px'; }
-    });
-    return wins;
+    if (rootEl) {
+        Object.entries(wins).forEach(function(e) {
+            var name = e[0], pos = e[1];
+            var el = rootEl.querySelector('[data-selo-id="' + name + '"]');
+            if (el) { el.style.left = (pos.x || 0) + 'px'; el.style.top = (pos.y || 0) + 'px'; }
+        });
+    }
+    return null;
 });
 `;
 
