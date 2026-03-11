@@ -12,11 +12,12 @@ Introducing the Croquet-TeaTime-inspired, Renkon-driven collaborative computatio
 * Portals, Recursive spawning and Parallelising **"sheaf of sheaves of VMs"** running in form of Renkon signals
 * No dependencies - works directly in browser or NodeJS
 * Snapshot/Restoring logic - late joiners get full state + history replay
+* **Krestianify compiller** converts a unified Renkon app (single source string) into the model/view split that KrestianstvoVM.start() expects.
 
 ### Source files
 * [krestianstvo-vm.js](public/krestianstvo-vm.js)
+* [krestianify.js](public/krestianify.js)
 * [reflector.js](reflector.js)
-
 
 ![](public/doc/vm.gif)
 
