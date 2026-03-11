@@ -100,29 +100,24 @@ const _vm_drain = (s) => {
         const val = (msg.data && typeof msg.data === 'object')
             ? { ...msg.data, from: msg.from }
             : { value: msg.data, from: msg.from };
-        app._ps.registerEvent(msg.type, val);
+        // Feed the model PS receiver for this message so FRP nodes fire.
+        // viewToModel types (incr/decr) are handled by _makeSend 3rd-step instead —
+        // they must not be double-registered here or they'd fire twice.
+        if (!(app.viewEchoExclude && app.viewEchoExclude.has(msg.type))) {
+            app._ps.registerEvent(msg.type, msg.data);
+        }
         // Notify meta PS if spawned list changed
         if (app.metaPS && next.spawned !== s.spawned)
             app.metaPS.registerEvent('_spawned', next.spawned.slice());
         if (app.viewPS && msg.type !== 'spawnSelo') {
-            app.viewPS.registerEvent(msg.type, val);
+            if (!app.viewEchoExclude || !app.viewEchoExclude.has(msg.type))
+                app.viewPS.registerEvent(msg.type, val);
             // Push objects + vTime directly from worldState — always current after drain
             if (next.objects !== s.objects) app.viewPS.registerEvent('objects', next.objects);
             if (next.time   !== s.time)    app.viewPS.registerEvent('vTime',   next.time);
-            // Push all modelStateKeys — read directly from model PS nodes after each drain step
-            var _mkeys = app.modelStateKeys || [];
-            var _mprev = app._modelStatePrev || {};
-            for (var _mi = 0; _mi < _mkeys.length; _mi++) {
-                var _mk = _mkeys[_mi];
-                var _mv = (app._ps.resolved && app._ps.resolved.get(_mk))
-                       || (app._ps.scratch  && app._ps.scratch.get(_mk));
-                var _mval = _mv && _mv.value;
-                if (_mval !== undefined && _mval !== _mprev[_mk]) {
-                    app.viewPS.registerEvent(_mk, _mval);
-                    _mprev[_mk] = _mval;
-                }
-            }
-            app._modelStatePrev = _mprev;
+            // modelStateKeys are pushed to viewPS in _makeSend after FRP propagation —
+            // not here in drain, to avoid pushing stale PS node initial values (e.g. counter=0)
+            // over correct snapshot-restored values.
         }
     }
     return _vm_drain(next);
@@ -235,14 +230,15 @@ function buildModelPreamble(applyActionBody) {
     const worldStateSrc = _src(function() {
 const incoming = _raw;
 const worldState = Behaviors.collect(
-    { time:      app.initialTime || 0,
+    Object.assign({}, _initialState, {
+      time:      app.initialTime || 0,
       queue:     _initialState.queue    || [],
       objects:   _initialObjects,
       spawned:   _initialState.spawned  || [],
       ticking:   _initialState.ticking  || false,
       windows:   _initialState.windows  || {},
       seed:      _initialState.seed     || 0,
-      _rngState: _initialState._rngState || _xoroshiroSeed(_initialState.seed || 1) },
+      _rngState: _initialState._rngState || _xoroshiroSeed(_initialState.seed || 1) }),
     Events.or(incoming, Events.change($worldState)),
     (state, ev) => {
         if (!ev) return state;
@@ -269,11 +265,13 @@ const objects = Behaviors.collect((_initialState && _initialState.objects) || {}
         'const _initialObjects = app.initialObjects || {};',
         'const _initialState   = app.initialState   || {};',
         'const _raw            = Events.receiver({ queued: true });',
-        'const _pendingFutures = [];',
+        'const _pendingFutures = []; app._pendingFutures = _pendingFutures;',
         xoroshiroSeedSrc,
         xoroshiroNextSrc,
         'const _rngRef = _initialState._rngState ? [..._initialState._rngState] : _xoroshiroSeed(_initialState.seed || 1);',
+        'app._rngRef = _rngRef;',
         'const random = () => _xoroshiroNext(_rngRef);',
+        'const now    = () => app._vTime || 0;',
         futureSrc,
         applyActionSrc,
         enqueueSrc,
@@ -301,6 +299,13 @@ const myObject = Behaviors.collect(null, Events.change($objects), function(_, ob
     const id = clientIdentity && clientIdentity.clientId;
     return id ? ((objs && objs[id]) || null) : null;
 });
+// _kfy_send(type, data) — send an action to the reflector from any view node.
+// krestianify auto-generates calls to this for every viewToModel node.
+const _kfy_send = function(type, data) {
+    var ws = Renkon.app.ws;
+    if (ws && ws.readyState === WebSocket.OPEN)
+        ws.send(JSON.stringify({ type: type, data: data }));
+};
 }) + '\n';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -326,6 +331,8 @@ class KrestianstvoVM {
         this._viewProgram    = '';
         this._applyAction    = '';
 
+        this.viewAppExtra    = {};       // merged into viewApp before viewPS is created
+        this.viewEchoExclude = new Set(); // msg.type names NOT echoed back to viewPS (krestianify sets these)
         this.onSeloJoined  = null;
         this.onViewPSReady = null;
         this.onSpawn       = null;
@@ -351,7 +358,7 @@ class KrestianstvoVM {
         ws.onclose = () => console.log('[VM] WS closed');
 
         // ── View PS ───────────────────────────────────────────────────────
-        const viewApp = {
+        const viewApp = Object.assign({
             ws:    ws,
             depth: this.depth,
             onSpawnSelo: function(ev) {
@@ -359,7 +366,7 @@ class KrestianstvoVM {
                     ? (ev.name || ev.value || '') : String(ev || '');
                 self._emitSpawn(name);
             }
-        };
+        }, self.viewAppExtra || {});
         this.viewPS = new ProgramState(Date.now(), viewApp, true);
         this.viewPS.setupProgram([VIEW_PREAMBLE + this._viewProgram]);
         this.viewPS.evaluator(Date.now());
@@ -463,9 +470,21 @@ const children$ = Behaviors.collect(
         // Push objects + vTime directly from snapshot — fundamental, always present
         this.viewPS.registerEvent('objects', snap.objects || {});
         this.viewPS.registerEvent('vTime',   snap.time   || 0);
-        // Push all modelStateKeys to viewPS from snapshot — single uniform path
+        // Push modelStateKeys AFTER restoreModelSelo+evaluate so drain cannot overwrite them
         (this.modelStateKeys || []).forEach(k => {
-            if (snap[k] != null) this.viewPS.registerEvent(k, snap[k]);
+            console.log('[SNAP_APPLY push]', k, '=', snap[k]);
+            if (snap[k] !== undefined) this.viewPS.registerEvent(k, snap[k]);
+        });
+        // Push again via Promise so any drain triggered by restore cannot overwrite
+        var _self2 = this;
+        var _snap2 = snap;
+        Promise.resolve().then(function() {
+            (_self2.modelStateKeys || []).forEach(function(k) {
+                if (_snap2[k] !== undefined) {
+                    console.log('[SNAP_APPLY re-push]', k, '=', _snap2[k]);
+                    _self2.viewPS.registerEvent(k, _snap2[k]);
+                }
+            });
         });
         const buffered = state.buffer;
         // Replay buffered msgs after current call stack — Promise.resolve() is safe here
@@ -477,16 +496,18 @@ const children$ = Behaviors.collect(
                         : bMsg.type === 'client_msg' ? ((bMsg.data && bMsg.data.serverTime) || 0) : 0;
                 if (t) { selo.ps.evaluate(t); selo.ps.evaluate(t); }
             }
-            // Re-push all modelStateKeys after replay — final authoritative values
-            // even if drain pushed intermediate values during buffered replay
+            // Re-push modelStateKeys after replay.
+            // Use _modelStatePrev (updated by _makeSend FRP step during replay) if available,
+            // otherwise fall back to snapshot value — never re-read raw PS node (always 0 for FRP nodes).
             var _self = this;
             var _wss = _self._getModelNode(selo.ps, 'worldState');
             if (_wss) {
                 _self.viewPS.registerEvent('objects', _wss.objects || {});
                 _self.viewPS.registerEvent('vTime',   _wss.time   || 0);
             }
+            var _msp = (selo.appRef && selo.appRef._modelStatePrev) || {};
             (_self.modelStateKeys || []).forEach(function(k) {
-                var v = _self._getModelNode(selo.ps, k);
+                var v = (_msp[k] !== undefined) ? _msp[k] : snap[k];
                 if (v !== undefined) _self.viewPS.registerEvent(k, v);
             });
             // Reset children$ to snapshot's spawned list — clears stale children from previous selo
@@ -577,16 +598,25 @@ const children$ = Behaviors.collect(
         wss = this._getModelNode(selo.ps, 'worldState') || wss;
         // Snapshot the full worldState — all fields preserved for joiner's _restoreModelSelo.
         // modelStateKeys Renkon node values are added below (they may differ from worldState fields).
+        // Prefer _postFRPRngState — captured after Renkon FRP propagation where
+        // random() may have been called in model Behaviors.collect accumulators.
+        // Falls back to wss._rngState (captured in drain after applyAction, pre-FRP).
+        var _postFRP = selo.appRef && selo.appRef._postFRPRngState;
         var payload = Object.assign({}, wss, {
-            _rngState: wss._rngState ? wss._rngState.slice()
-                                     : _vm_xoroshiroSeed(wss.seed || 1),
+            _rngState: _postFRP ? _postFRP.slice()
+                     : wss._rngState ? wss._rngState.slice()
+                     : _vm_xoroshiroSeed(wss.seed || 1),
         });
-        // Include modelStateKeys — read directly from model PS nodes (like old vm's modelNodes)
+        // Include modelStateKeys — prefer _modelStatePrev (updated after FRP propagation
+        // in _makeSend) over PS node read (which may be stale if last msg was FRP-driven).
+        var _msp = (selo.appRef && selo.appRef._modelStatePrev) || {};
+        console.log('[SNAP SEND] _modelStatePrev:', JSON.stringify(_msp));
         (this.modelStateKeys || []).forEach(k => {
-            var v = this._getModelNode(selo.ps, k);
+            var v = (_msp[k] !== undefined) ? _msp[k] : this._getModelNode(selo.ps, k);
+            console.log('[SNAP SEND] key:', k, 'from _msp:', _msp[k], 'from ps:', this._getModelNode(selo.ps, k), '→', v);
             if (v !== undefined) payload[k] = v;
         });
-        console.log('SNAP SEND t=' + wss.time + ' queue=' + JSON.stringify(payload.queue));
+        console.log('[SNAP SEND] t=' + wss.time + ' counter=' + payload.counter);
         this.ws.send(JSON.stringify({ type: 'snapshot_response', targetUser: targetUser, payload: payload }));
     }
 
@@ -596,12 +626,67 @@ const children$ = Behaviors.collect(
             var t = ev.type === 'heartbeat'  ? (ev.vTime || 0)
                   : ev.type === 'client_msg' ? ((ev.data && ev.data.serverTime) || 0) : 0;
             if (!psRef._ps) return;
+            // Snapshot modelStateKey PS values BEFORE any evaluation — baseline for change detection
+            var _vps    = psRef.viewPS;
+            var _keys   = psRef.modelStateKeys || [];
+            var _prev   = psRef._modelStatePrev || {};
+            var _before = {};
+            for (var _bi = 0; _bi < _keys.length; _bi++) {
+                var _bk = _keys[_bi];
+                var _bn = (psRef._ps.resolved && psRef._ps.resolved.get(_bk))
+                        || (psRef._ps.scratch  && psRef._ps.scratch.get(_bk));
+                _before[_bk] = _bn && _bn.value;
+            }
+            // Keep app._vTime current so now() works in model accumulator bodies
+            psRef._vTime = t;
             psRef._ps.registerEvent('_raw', ev);
-            
-            //evaluate(t) call 1 → Events.next gets msg → _raw  → incoming → worldState enqueues
-            //evaluate(t) call 2 → Events.change($worldState) → drain → msg processed
+            // evaluate x2: (1) enqueue into worldState, (2) drain worldState
+            // drain also registerEvent(msg.type) for non-viewToModel types (tick, subTick etc.)
             psRef._ps.evaluate(t);
             psRef._ps.evaluate(t);
+            // evaluate x1: propagate any events registered by drain (tick, subTick, etc.)
+            // or register viewToModel events (incr/decr) that drain skipped, then propagate
+            if (ev.type === 'client_msg' && ev.data && ev.data.type) {
+                var _innerType = ev.data.type;
+                var _innerData = ev.data.data;
+                if (psRef.viewEchoExclude && psRef.viewEchoExclude.has(_innerType)) {
+                    psRef._ps.registerEvent(_innerType, _innerData);
+                }
+            }
+            psRef._ps.evaluate(t);
+            // Push any modelStateKeys that changed vs baseline
+            for (var _j = 0; _j < _keys.length; _j++) {
+                var _k2 = _keys[_j];
+                var _na = (psRef._ps.resolved && psRef._ps.resolved.get(_k2))
+                        || (psRef._ps.scratch  && psRef._ps.scratch.get(_k2));
+                var _va = _na && _na.value;
+                if (_vps && _va !== undefined && _va !== _before[_k2]) {
+                    _vps.registerEvent(_k2, _va);
+                    _prev[_k2] = _va;
+                }
+            }
+            psRef._modelStatePrev = _prev;
+
+            // Flush any futures scheduled during FRP (e.g. from Behaviors.collect
+            // accumulators calling future()). drain already ran so _pendingFutures were
+            // not spliced in — do it now by injecting them into the worldState queue.
+            if (psRef._pendingFutures && psRef._pendingFutures.length) {
+                var _frpFutures = psRef._pendingFutures.splice(0);  // appRef._pendingFutures
+                // Read current worldState node and append futures to its queue
+                var _wsNode = (psRef._ps.resolved && psRef._ps.resolved.get('worldState'))
+                           || (psRef._ps.scratch  && psRef._ps.scratch.get('worldState'));
+                if (_wsNode && _wsNode.value) {
+                    _wsNode.value.queue = (_wsNode.value.queue || []).concat(_frpFutures);
+                }
+            }
+            // Capture _rngRef AFTER full FRP — random() may be called in model
+            // Behaviors.collect accumulators (e.g. color). The model preamble sets
+            // app._rngRef = _rngRef, and app IS appRef (= psRef here). So psRef._rngRef
+            // is the live mutated array. Snapshot it now for accurate joiner restore.
+            if (psRef._rngRef && Array.isArray(psRef._rngRef)) {
+                psRef._postFRPRngState = psRef._rngRef.slice();
+            }
+
         };
     }
 
@@ -612,14 +697,15 @@ const children$ = Behaviors.collect(
         initialState   = initialState   || {};
         var self = this;
         var appRef = {
-            viewPS:          this.viewPS,
-            metaPS:          this.ps,
-            _ps:             null,
-            ws:              this.ws,
-            initialObjects:  initialObjects,
-            initialState:    initialState,
-            initialTime:     initialTime,
-            modelStateKeys:  this.modelStateKeys || [],
+            viewPS:           this.viewPS,
+            metaPS:           this.ps,
+            _ps:              null,
+            ws:               this.ws,
+            initialObjects:   initialObjects,
+            initialState:     initialState,
+            initialTime:      initialTime,
+            modelStateKeys:   this.modelStateKeys || [],
+            viewEchoExclude:  this.viewEchoExclude || new Set(),
             _modelStatePrev: (function(keys, init) {
                 var p = {};
                 keys.forEach(function(k) { if (init[k] !== undefined) p[k] = init[k]; });
@@ -638,7 +724,7 @@ const children$ = Behaviors.collect(
             throw e;
         }
         ps.options = { once: true };
-        return { ps: ps, send: this._makeSend(appRef) };
+        return { ps: ps, send: this._makeSend(appRef), appRef: appRef };
     }
 
     // ── _restoreModelSelo ─────────────────────────────────────────────────

@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Krestianify — Balls Demo</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 100%; height: 100%; background: #111; font-family: monospace; }
+#stage { width: 100%; height: 100dvh; display: flex; flex-direction: column; }
+#header {
+  flex: 0 0 auto; padding: 8px 16px;
+  background: #1a1a2e; color: #aef; font-size: 13px;
+  border-bottom: 1px solid #333;
+  align-items: center; gap: 16px;
+}
+#header h1 { color: #cdf; }
+.hint { font-size: 11px; color: #556; }
+#vms { flex: 1; display: flex; min-height: 0; }
+.vm-pane { flex: 1; border-right: 1px solid #333; position: relative; overflow: hidden; }
+.vm-pane:last-child { border-right: none; }
+.vm-root { position: absolute; inset: 0; overflow: hidden; background: #0d0d1a; cursor: crosshair; touch-action: none; -webkit-user-select: none; }
+.k-label { position: absolute; top: 8px; left: 12px; font-size: 11px; color: #334; letter-spacing: 1px; pointer-events: none; z-index: 1; }
+.k-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="header">
+    <h1>Krestianify — Balls Demo</h1>
+    <span class="hint">Click → spawn ball → auto-expires via <code>future(now(), 3000, 'expire', {id})</code> from inside Behaviors.collect</span>
+    <span class="hint" style="margin-left:auto">Two peers · same reflector</span>
+  </div>
+  <div id="vms">
+    <div class="vm-pane"><div id="vmA-root" class="vm-root"></div></div>
+    <div class="vm-pane"><div id="vmB-root" class="vm-root"></div></div>
+  </div>
+</div>
+
+<script type="module">
+import { KrestianstvoVM } from './krestianstvo-vm.js';
+import { ProgramState }   from 'https://cdn.jsdelivr.net/npm/renkon-core/dist/renkon-core.js';
+window.KrestianstvoVM = KrestianstvoVM;
+window.ProgramState   = ProgramState;
+</script>
+<script src="./krestianify.js"></script>
+
+<script type="module">
+import { KrestianstvoVM } from './krestianstvo-vm.js';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// USER PROGRAM
+//
+// MODEL_NODES = ['balls', 'expire']
+//
+// • click  — view event, auto-wired to model by krestianify
+// • expire — model event, delivered by future() back into model
+// • balls  — model state: array of {id, x, y, r, color, spawnedAt}
+//            spawnedAt = now() (virtual time) — deterministic on all peers
+//
+// Demonstrates: future(now(), 3000, 'expire', ...) called from INSIDE
+// a Behaviors.collect accumulator — previously broken, now supported.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const APP = `
+// ── MODEL ─────────────────────────────────────────────────────────────────
+
+const expire = Events.receiver();
+
+const balls = Behaviors.collect([], Events.or(click, expire), (prev, ev) => {
+    if (!ev) return prev;
+    if (ev.type === 'expire') {
+        return prev.filter(b => b.id !== ev.id);
+    }
+    var id    = Math.floor(random() * 1e9);
+    var hue   = Math.floor(random() * 360);
+    var r     = 18 + Math.floor(random() * 36);
+    var ball  = { id: id, x: ev.x, y: ev.y, r: r,
+                  color: 'hsl(' + hue + ',80%,60%)',
+                  spawnedAt: now() };
+    future(now(), 3000, 'expire', { type: 'expire', id: id });
+    return prev.concat(ball);
+});
+
+// ── VIEW ──────────────────────────────────────────────────────────────────
+
+// Unified pointer: fires on mouse click OR touch tap (prevents double-fire on touch)
+// touchstart: always cancelable, feels instant, no passive:false needed for start.
+// preventDefault() stops scroll AND the synthetic click — no ghost click suppression needed.
+const _touchTap = Events.listener(Renkon.app.rootEl, 'touchstart', (e) => {
+    if (e.cancelable) e.preventDefault();
+    Renkon.app.rootEl._lastTouch = Date.now();
+    var rect = Renkon.app.rootEl.getBoundingClientRect();
+    var t = e.touches[0];
+    return { x: t.clientX - rect.left, y: t.clientY - rect.top };
+});
+const _mouseClick = Events.listener(Renkon.app.rootEl, 'click', (e) => {
+    if (Renkon.app.rootEl._lastTouch && Date.now() - Renkon.app.rootEl._lastTouch < 500) return null;
+    var rect = Renkon.app.rootEl.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+});
+const click = Events.or(_touchTap, _mouseClick);
+
+// Wall-clock ticker at ~60fps for smooth fade animation — view-side only, not replicated.
+const _frame = Events.timer(16);
+
+// Draw — triggered by either balls change or every animation frame
+const _render = Behaviors.collect(null, Events.or(Events.change($balls), _frame), (_, __) => {
+    var canvas = Renkon.app.rootEl.querySelector('.k-canvas');
+    if (!canvas) return null;
+    var bs  = balls || [];
+    var ctx = canvas.getContext('2d');
+    var W   = canvas.width  = canvas.offsetWidth;
+    var H   = canvas.height = canvas.offsetHeight;
+    ctx.clearRect(0, 0, W, H);
+    var now = Date.now();
+    var map = (Renkon.app.rootEl._wallSpawnMap = Renkon.app.rootEl._wallSpawnMap || {});
+    // prune map
+    var ids = {};
+    bs.forEach(function(b) { ids[b.id] = true; });
+    Object.keys(map).forEach(function(k) { if (!ids[k]) delete map[k]; });
+    bs.forEach(function(b) {
+        if (!map[b.id]) map[b.id] = now;
+        var age   = Math.min(1, (now - map[b.id]) / 3000);
+        var alpha = 1 - age * 0.8;
+        var scale = 1 - age * 0.3;
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, alpha);
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r * scale, 0, Math.PI * 2);
+        ctx.fillStyle = b.color;
+        ctx.shadowColor = b.color;
+        ctx.shadowBlur = 24;
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(b.x - b.r * 0.25 * scale, b.y - b.r * 0.25 * scale,
+                b.r * 0.35 * scale, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.25)';
+        ctx.shadowBlur = 0;
+        ctx.fill();
+        ctx.restore();
+    });
+    return null;
+});
+`;
+
+const MODEL_NODES = ['balls', 'expire'];
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COMPILE
+// ═══════════════════════════════════════════════════════════════════════════
+
+const compiled = krestianify(APP, MODEL_NODES);
+
+console.group('%c[krestianify] balls demo', 'color:#0f9;font-weight:bold');
+console.log('modelStateKeys:', compiled.modelStateKeys);
+console.log('viewToModel:',   [...compiled.viewToModel]);
+console.log('modelToView:',   [...compiled.modelToView]);
+console.log('applyAction:\n'  + compiled.applyAction);
+console.log('--- modelProgram ---\n' + compiled.modelProgram);
+console.log('--- viewProgram ---\n'  + compiled.viewProgram);
+console.groupEnd();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BOOT
+// ═══════════════════════════════════════════════════════════════════════════
+
+function parseUrlParams() {
+    const p = new URLSearchParams(window.location.search);
+    const seloId = p.get('k') || 'kfy-balls';
+    let wsUrl = 'ws://localhost:3000';
+    const r = p.get('r');
+    if (r) wsUrl = r.replace(/^https:\/\//, 'wss://').replace(/^http:\/\//, 'ws://');
+    return { seloId, wsUrl };
+}
+
+function buildUI(rootEl, label) {
+    rootEl.innerHTML = `
+        <div class="k-label">${label}</div>
+        <canvas class="k-canvas"></canvas>
+    `;
+}
+
+function bootVM(rootEl, label, seloId, wsUrl, delay) {
+    buildUI(rootEl, label);
+    setTimeout(() => {
+        const vm = new KrestianstvoVM({ seloId, wsUrl });
+        vm.modelStateKeys  = compiled.modelStateKeys;
+        vm.viewEchoExclude = compiled.viewToModel;
+        vm.viewAppExtra    = { rootEl };
+        vm.start({
+            modelProgram: compiled.modelProgram,
+            viewProgram:  compiled.viewProgram,
+            applyAction:  compiled.applyAction,
+        });
+    }, delay);
+}
+
+const { seloId, wsUrl } = parseUrlParams();
+bootVM(document.getElementById('vmA-root'), 'peer A', seloId, wsUrl, 0);
+bootVM(document.getElementById('vmB-root'), 'peer B', seloId, wsUrl, 350);
+</script>
+</body>
+</html>

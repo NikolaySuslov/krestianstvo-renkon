@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Krestianstvo VM2 — FRP Tests</title>
+<style>
+  body { font-family: monospace; font-size: 13px; background: #111; color: #ddd; padding: 16px; }
+  h2   { color: #aef; margin: 0 0 12px; }
+  #log { white-space: pre-wrap; line-height: 1.6; }
+  .pass { color: #4f4; font-weight: bold; }
+  .fail { color: #f44; font-weight: bold; }
+  .inf  { color: #aaa; }
+  .err  { color: #f80; }
+</style>
+</head>
+<body>
+<h2>Krestianstvo VM2 — FRP Tests</h2>
+<div id="log"></div>
+
+<script type="module" is:inline>
+import { KrestianstvoVM } from './krestianstvo-vm.js';
+import { MODEL_PROGRAM, VIEW_PROGRAM, APPLY_ACTION } from './tests.js';
+(async () => {
+
+    // ── helpers ───────────────────────────────────────────────────────────
+    function uiLog(msg, cls) {
+        const d = document.getElementById('log');
+        const s = document.createElement('span');
+        s.className = cls || '';
+        s.textContent = msg + '\n';
+        d.appendChild(s);
+    }
+
+    function assert(label, ok, detail) {
+        const msg = (ok ? 'PASS' : 'FAIL') + ' -- ' + label + (detail ? '  ' + detail : '');
+        uiLog(msg, ok ? 'pass' : 'fail');
+    }
+
+    function getNode(ps, k) {
+        if (!ps) return undefined;
+        const n = (ps.resolved && ps.resolved.get(k))
+               || (ps.scratch  && ps.scratch.get(k));
+        return n && n.value;
+    }
+
+    function getWorldState(vm, k) {
+        const wss = getNode(vm.modelPS, 'worldState');
+        return wss ? wss[k] : undefined;
+    }
+
+    // ── boot ──────────────────────────────────────────────────────────────
+    const cfg = { modelProgram: MODEL_PROGRAM, viewProgram: VIEW_PROGRAM, applyAction: APPLY_ACTION };
+
+    const vmA = new KrestianstvoVM({ seloId: 'test-selo' });
+    const vmB = new KrestianstvoVM({ seloId: 'test-selo' });
+    const modelStateKeys = ['ticking', 'randomResult', 'counter', 'subCounter'];
+    vmA.modelStateKeys = modelStateKeys;
+    vmB.modelStateKeys = modelStateKeys;
+
+    vmA.onSeloJoined = ev => uiLog('vmA joined ' + ev.seloId + ' as ' + ev.clientId, 'inf');
+    vmB.onSeloJoined = ev => uiLog('vmB joined ' + ev.seloId + ' as ' + ev.clientId, 'inf');
+
+    vmA.start(cfg);
+    setTimeout(() => vmB.start(cfg), 200);
+
+    // ── TEST 1 (t=2s): vTime equal on both peers ──────────────────────────
+    setTimeout(() => {
+        uiLog('--- TEST 1: vTime sync ---', 'inf');
+        const tA = getNode(vmA.modelPS, 'vTime');
+        const tB = getNode(vmB.modelPS, 'vTime');
+        uiLog('vmA vTime=' + tA + '  vmB vTime=' + tB, 'inf');
+        assert('vTime equal on both peers', tA === tB, '(tA=' + tA + ' tB=' + tB + ')');
+    }, 2000);
+
+    // ── TEST 2 (t=2.5s): counter + subCounter sync after toggleTick ─────────
+    setTimeout(() => {
+        uiLog('--- TEST 2: counter + subTick sync after toggleTick ---', 'inf');
+        vmA.ws.send(JSON.stringify({ type: 'toggleTick', data: {} }));
+    }, 2500);
+
+    // Stop ticking 1.5s before reading — gives last subTick batch time to drain
+    setTimeout(() => {
+        vmA.ws.send(JSON.stringify({ type: 'toggleTick', data: {} }));
+    }, 5500);
+
+    // Read 1.5s after stop — all pending subTicks (up to +900ms virtual) drained
+    setTimeout(() => {
+        const cA  = getNode(vmA.modelPS, 'counter');
+        const cB  = getNode(vmB.modelPS, 'counter');
+        const scA = getNode(vmA.modelPS, 'subCounter');
+        const scB = getNode(vmB.modelPS, 'subCounter');
+        uiLog('vmA counter=' + cA + '  vmB counter=' + cB, 'inf');
+        uiLog('vmA subCounter=' + scA + '  vmB subCounter=' + scB, 'inf');
+        assert('counter equal on both peers', cA === cB, '(cA=' + cA + ' cB=' + cB + ')');
+        assert('counter > 0', (cA || 0) > 0, '(cA=' + cA + ')');
+        assert('subCounter equal on both peers', scA === scB, '(scA=' + scA + ' scB=' + scB + ')');
+        assert('subCounter is multiple of 9', scA % 9 === 0,
+            '(subCounter=' + scA + ' — should be multiple of 9)');
+        assert('subCounter >= counter × 9 - 9', scA >= (cA - 1) * 9,
+            '(subCounter=' + scA + ' counter=' + cA + ' — at most one batch behind)');
+    }, 7000);
+
+    // ── TEST 3 (t=7.5s): randomResult equal ─────────────────────────────
+    setTimeout(() => {
+        uiLog('--- TEST 3: deterministic random() ---', 'inf');
+        vmB.ws.send(JSON.stringify({ type: 'toggleTick', data: {} }));
+    }, 7500);
+
+    setTimeout(() => {
+        const rA = getWorldState(vmA, 'randomResult');
+        const rB = getWorldState(vmB, 'randomResult');
+        uiLog('vmA randomResult=' + rA + '  vmB randomResult=' + rB, 'inf');
+        assert('randomResult equal (exact float)', rA === rB, '(rA=' + rA + ' rB=' + rB + ')');
+        assert('randomResult is a number', typeof rA === 'number');
+        vmB.ws.send(JSON.stringify({ type: 'toggleTick', data: {} }));
+    }, 8600);
+
+    // ── TEST 4 (t=9s): peer tracking ──────────────────────────────────────
+    setTimeout(() => {
+        uiLog('--- TEST 4: peer tracking ---', 'inf');
+        const wsA = getWorldState(vmA, 'objects');
+        const wsB = getWorldState(vmB, 'objects');
+        const keysA = Object.keys(wsA || {});
+        const keysB = Object.keys(wsB || {});
+        uiLog('vmA peers: ' + keysA.join(', '), 'inf');
+        uiLog('vmB peers: ' + keysB.join(', '), 'inf');
+        assert('both peers see 2 peers', keysA.length === 2 && keysB.length === 2,
+            '(A=' + keysA.length + ' B=' + keysB.length + ')');
+        assert('same peer keys on both', JSON.stringify(keysA.sort()) === JSON.stringify(keysB.sort()));
+    }, 9000);
+
+    // ── TEST 5 (t=10s): recursive spawn depth 3 ───────────────────────────
+    const spawnLog = [];
+
+    function trackSpawns(vm, label) {
+        vm.onSpawn = ev => {
+            spawnLog.push({ name: ev.name, depth: ev.depth, peer: label });
+            uiLog('onSpawn [' + label + ']: ' + ev.name + ' depth=' + ev.depth, 'inf');
+            trackSpawns(ev.vm, label + '>' + ev.name);
+        };
+    }
+
+    setTimeout(() => {
+        uiLog('--- TEST 5: recursive spawn depth 3 ---', 'inf');
+        trackSpawns(vmA, 'vmA');
+        trackSpawns(vmB, 'vmB');
+        uiLog('Step 1: spawnSelo child-1', 'inf');
+        vmA.ws.send(JSON.stringify({ type: 'spawnSelo', data: { name: 'child-1' } }));
+    }, 10000);
+
+    setTimeout(() => {
+        const c1 = vmA._getChildVM('child-1');
+        if (c1 && c1.ws && c1.ws.readyState === WebSocket.OPEN) {
+            uiLog('Step 2: spawnSelo child-2 (via child-1)', 'inf');
+            c1.ws.send(JSON.stringify({ type: 'spawnSelo', data: { name: 'child-2' } }));
+        } else {
+            uiLog('Step 2 SKIP: child-1 VM not ready ws=' + (c1 ? c1.ws && c1.ws.readyState : 'null'), 'err');
+        }
+    }, 11000);
+
+    setTimeout(() => {
+        const c1 = vmA._getChildVM('child-1');
+        const c2 = c1 && c1._getChildVM('child-2');
+        if (c2 && c2.ws && c2.ws.readyState === WebSocket.OPEN) {
+            uiLog('Step 3: spawnSelo child-3 (via child-2)', 'inf');
+            c2.ws.send(JSON.stringify({ type: 'spawnSelo', data: { name: 'child-3' } }));
+        } else {
+            uiLog('Step 3 SKIP: child-2 VM not ready', 'err');
+        }
+    }, 12000);
+
+    setTimeout(() => {
+        uiLog('--- TEST 5 results ---', 'inf');
+        const aLog = spawnLog.filter(e => e.peer.startsWith('vmA'));
+        const bLog = spawnLog.filter(e => e.peer.startsWith('vmB'));
+        uiLog('vmA spawns: ' + aLog.map(e => e.name + '@' + e.depth).join(', '), 'inf');
+        uiLog('vmB spawns: ' + bLog.map(e => e.name + '@' + e.depth).join(', '), 'inf');
+        assert('vmA spawned child-1 depth=1', aLog.some(e => e.name === 'child-1' && e.depth === 1));
+        assert('vmB spawned child-1 depth=1', bLog.some(e => e.name === 'child-1' && e.depth === 1));
+        assert('vmA spawned child-2 depth=2', aLog.some(e => e.name === 'child-2' && e.depth === 2));
+        assert('vmB spawned child-2 depth=2', bLog.some(e => e.name === 'child-2' && e.depth === 2));
+        assert('vmA spawned child-3 depth=3', aLog.some(e => e.name === 'child-3' && e.depth === 3));
+        assert('vmB spawned child-3 depth=3', bLog.some(e => e.name === 'child-3' && e.depth === 3));
+        assert('6 total spawn events (3 depths x 2 peers)', spawnLog.length >= 6, 'got ' + spawnLog.length);
+        uiLog('=== All tests complete ===', 'inf');
+    }, 13500);
+})();
+</script>
+</body>
+</html>

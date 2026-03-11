@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Krestianify — Compiler Demo</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: #1a1a2e; overflow: hidden; }
+  #stage { width: 100%; height: 100dvh; display: flex; flex-direction: column; }
+  #header {
+      flex: 0 0 auto; padding: 5px 14px;
+      padding-left: max(14px, env(safe-area-inset-left));
+      padding-right: max(14px, env(safe-area-inset-right));
+      background: #16213e; color: #aef;
+      font: 12px/1.5 monospace; border-bottom: 1px solid #334;
+      align-items: center; gap: 14px; flex-wrap: wrap;
+  }
+  #header h1 { font-size: 13px; color: #cdf; white-space: nowrap; }
+  .hint { font-size: 11px; color: #556; white-space: nowrap; }
+  #vms { flex: 1; display: flex; overflow: hidden; min-height: 0; }
+  .vm-pane { flex: 1; position: relative; border-right: 1px solid #334; overflow: hidden; min-width: 0; }
+  .vm-pane:last-child { border-right: none; }
+  .vm-root { position: absolute; inset: 0; background: #f5f5f8; overflow: hidden;
+             cursor: crosshair; outline: none; font-family: monospace;
+             touch-action: none; }
+  .avatar {
+      position: absolute; width: 36px; height: 36px; border-radius: 50%;
+      border: 3px solid #8899bb; background: #fff;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px; font-weight: bold; color: #334; text-align: center;
+      line-height: 1.2; pointer-events: none; white-space: pre;
+  }
+</style>
+<!-- krestianstvo-ui.js must load BEFORE the ES module -->
+<script src="./demo/krestianstvo-ui.js"></script>
+<!-- krestianify.js: depends only on ProgramState (from renkon-core via krestianstvo-vm.js) -->
+<script src="./krestianify.js"></script>
+</head>
+<body>
+<div id="stage">
+  <div id="header">
+    <h1>Krestianify — Compiler Demo</h1>
+    <span class="hint">Click canvas → move avatar</span>
+    <span class="hint">Space → toggle tick</span>
+    <span class="hint">Unified Renkon app → auto-compiled → krestianstvo</span>
+    <span class="hint" style="margin-left:auto">Two peers · one reflector</span>
+  </div>
+  <div id="vms">
+    <div class="vm-pane"><div id="vmA-root" class="vm-root"></div></div>
+    <div class="vm-pane"><div id="vmB-root" class="vm-root"></div></div>
+  </div>
+</div>
+<script type="module">
+import { KrestianstvoVM } from './krestianstvo-vm.js';
+import { installDOMHandlers } from './demo/dom-demo.js';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// UNIFIED APP — written as a plain Renkon program.
+// No model/view split needed by hand.
+// The developer just declares which nodes are "model" below.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const UNIFIED_APP = `
+// ── MODEL nodes: shared, deterministic, replicated ────────────────────────
+const ticking = Behaviors.collect(
+    (_initialState && _initialState.ticking) || false,
+    Events.change($worldState),
+    (_, s) => s ? s.ticking : false
+);
+const windows = Behaviors.collect(
+    (_initialState && _initialState.windows) || {},
+    Events.change($worldState),
+    (_, s) => s ? s.windows : {}
+);
+const randomResult = Behaviors.collect(
+    (_initialState && _initialState.randomResult) || null,
+    Events.change($worldState),
+    (_, s) => s ? s.randomResult : null
+);
+const tick       = Events.receiver();
+const subTick    = Events.receiver();
+const counter    = Behaviors.collect(
+    (_initialState && _initialState.counter) || 0,
+    tick, function(prev, _) { return prev + 1; }
+);
+const subCounter = Behaviors.collect(
+    (_initialState && _initialState.subCounter) || 0,
+    subTick, function(prev, _) { return prev + 1; }
+);
+
+// ── VIEW nodes: local per-client ──────────────────────────────────────────
+// (provided by the VIEW_PROGRAM in dom-demo.js — injected separately below)
+`;
+
+// Declare which node names belong to the model (shared / deterministic).
+// Everything else is view-local.
+const MODEL_NODES = ['ticking', 'windows', 'randomResult', 'tick', 'subTick', 'counter', 'subCounter'];
+
+// The applyAction body is still explicit — it is pure JS state-machine logic,
+// not Renkon FRP, so it cannot be auto-split by the compiler.
+// (Same as dom-demo.js APPLY_ACTION.)
+import { APPLY_ACTION, VIEW_PROGRAM } from './demo/dom-demo.js';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COMPILE
+// ═══════════════════════════════════════════════════════════════════════════
+
+// KrestianstvoVM must be in scope so krestianify.js's krestianifyBoot can use it.
+// We attach it to window here.
+window.KrestianstvoVM = KrestianstvoVM;
+
+// ProgramState is needed by krestianify.js for static analysis.
+// It is imported by krestianstvo-vm.js and exposed on the module; we expose
+// it on window so krestianify.js (a plain script) can access it.
+// krestianstvo-vm.js re-exports ProgramState via the module, but since
+// krestianify is a plain script it reads window.ProgramState.
+// We import ProgramState directly from renkon-core here:
+import { ProgramState } from 'https://cdn.jsdelivr.net/npm/renkon-core/dist/renkon-core.js';
+window.ProgramState = ProgramState;
+
+const compiled = krestianify(UNIFIED_APP, MODEL_NODES);
+
+console.group('%c[krestianify] compilation result', 'color:#0f9;font-weight:bold');
+console.log('modelStateKeys:', compiled.modelStateKeys);
+console.log('modelToView:',    [...compiled.modelToView]);
+console.log('viewToModel:',    [...compiled.viewToModel]);
+console.log('modelProgram:\n', compiled.modelProgram);
+console.groupEnd();
+
+// dom-demo.js provides the VIEW_PROGRAM — append it to krestianify's view output
+// (krestianify's viewProgram will be empty here since UNIFIED_APP has no view nodes)
+const finalViewProgram = compiled.viewProgram + '\n' + VIEW_PROGRAM;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BOOT
+// ═══════════════════════════════════════════════════════════════════════════
+
+function parseUrlParams() {
+    const p = new URLSearchParams(window.location.search);
+    const seloId = p.get('k') || 'kfy-demo';
+    let wsUrl = 'ws://localhost:3000';
+    const r = p.get('r');
+    if (r) wsUrl = r.replace(/^https:\/\//, 'wss://').replace(/^http:\/\//, 'ws://');
+    return { seloId, wsUrl };
+}
+
+function bootVM(rootEl, seloId, wsUrl, delay) {
+    setTimeout(() => {
+        const vm = new KrestianstvoVM({ seloId, wsUrl });
+        vm.modelStateKeys = compiled.modelStateKeys;
+        installDOMHandlers(vm, rootEl);
+        vm.start({
+            modelProgram: compiled.modelProgram,
+            viewProgram:  finalViewProgram,
+            applyAction:  APPLY_ACTION,
+        });
+    }, delay);
+}
+
+const { seloId, wsUrl } = parseUrlParams();
+bootVM(document.getElementById('vmA-root'), seloId, wsUrl, 0);
+bootVM(document.getElementById('vmB-root'), seloId, wsUrl, 350);
+</script>
+</body>
+</html>
