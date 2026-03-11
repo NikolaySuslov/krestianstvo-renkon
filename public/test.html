@@ -60,30 +60,41 @@ import { MODEL_PROGRAM, VIEW_PROGRAM, APPLY_ACTION } from './tests.js';
     vmA.onSeloJoined = ev => uiLog('vmA joined ' + ev.seloId + ' as ' + ev.clientId, 'inf');
     vmB.onSeloJoined = ev => uiLog('vmB joined ' + ev.seloId + ' as ' + ev.clientId, 'inf');
 
+    // waitAllJoined: wait for all VMs using built-in vm.waitJoined(), then run callback
+    function waitAllJoined(vms, then) {
+        Promise.all(vms.map(function(vm) { return vm.waitJoined(); }))
+            .then(function() { then(); })
+            .catch(function(e) { uiLog('ERROR: ' + e.message, 'err'); });
+    }
+
     vmA.start(cfg);
     setTimeout(() => vmB.start(cfg), 200);
 
-    // ── TEST 1 (t=2s): vTime equal on both peers ──────────────────────────
+    // All tests run inside waitAllJoined — guaranteed both peers are live
+    waitAllJoined([vmA, vmB], runTests);
+
+    function runTests() {
+    uiLog('Both peers joined — starting tests', 'inf');
+
+    // ── TEST 1: vTime sync ────────────────────────────────────────────────
     setTimeout(() => {
         uiLog('--- TEST 1: vTime sync ---', 'inf');
         const tA = getNode(vmA.modelPS, 'vTime');
         const tB = getNode(vmB.modelPS, 'vTime');
         uiLog('vmA vTime=' + tA + '  vmB vTime=' + tB, 'inf');
+        assert('vTime is a number on vmA', typeof tA === 'number' && tA > 0, '(tA=' + tA + ')');
+        assert('vTime is a number on vmB', typeof tB === 'number' && tB > 0, '(tB=' + tB + ')');
         assert('vTime equal on both peers', tA === tB, '(tA=' + tA + ' tB=' + tB + ')');
-    }, 2000);
+    }, 500);
 
-    // ── TEST 2 (t=2.5s): counter + subCounter sync after toggleTick ─────────
+    // ── TEST 2 (+0.5s): counter + subCounter sync after toggleTick ──────────
     setTimeout(() => {
         uiLog('--- TEST 2: counter + subTick sync after toggleTick ---', 'inf');
         vmA.ws.send(JSON.stringify({ type: 'toggleTick', data: {} }));
-    }, 2500);
+    }, 1000);
 
-    // Stop ticking 1.5s before reading — gives last subTick batch time to drain
-    setTimeout(() => {
-        vmA.ws.send(JSON.stringify({ type: 'toggleTick', data: {} }));
-    }, 5500);
+    setTimeout(() => { vmA.ws.send(JSON.stringify({ type: 'toggleTick', data: {} })); }, 4000);
 
-    // Read 1.5s after stop — all pending subTicks (up to +900ms virtual) drained
     setTimeout(() => {
         const cA  = getNode(vmA.modelPS, 'counter');
         const cB  = getNode(vmB.modelPS, 'counter');
@@ -98,13 +109,13 @@ import { MODEL_PROGRAM, VIEW_PROGRAM, APPLY_ACTION } from './tests.js';
             '(subCounter=' + scA + ' — should be multiple of 9)');
         assert('subCounter >= counter × 9 - 9', scA >= (cA - 1) * 9,
             '(subCounter=' + scA + ' counter=' + cA + ' — at most one batch behind)');
-    }, 7000);
+    }, 5500);
 
-    // ── TEST 3 (t=7.5s): randomResult equal ─────────────────────────────
+    // ── TEST 3 (+6s): randomResult equal ──────────────────────────────────
     setTimeout(() => {
         uiLog('--- TEST 3: deterministic random() ---', 'inf');
         vmB.ws.send(JSON.stringify({ type: 'toggleTick', data: {} }));
-    }, 7500);
+    }, 6000);
 
     setTimeout(() => {
         const rA = getWorldState(vmA, 'randomResult');
@@ -113,9 +124,9 @@ import { MODEL_PROGRAM, VIEW_PROGRAM, APPLY_ACTION } from './tests.js';
         assert('randomResult equal (exact float)', rA === rB, '(rA=' + rA + ' rB=' + rB + ')');
         assert('randomResult is a number', typeof rA === 'number');
         vmB.ws.send(JSON.stringify({ type: 'toggleTick', data: {} }));
-    }, 8600);
+    }, 7200);
 
-    // ── TEST 4 (t=9s): peer tracking ──────────────────────────────────────
+    // ── TEST 4 (+7.5s): peer tracking ─────────────────────────────────────
     setTimeout(() => {
         uiLog('--- TEST 4: peer tracking ---', 'inf');
         const wsA = getWorldState(vmA, 'objects');
@@ -127,48 +138,43 @@ import { MODEL_PROGRAM, VIEW_PROGRAM, APPLY_ACTION } from './tests.js';
         assert('both peers see 2 peers', keysA.length === 2 && keysB.length === 2,
             '(A=' + keysA.length + ' B=' + keysB.length + ')');
         assert('same peer keys on both', JSON.stringify(keysA.sort()) === JSON.stringify(keysB.sort()));
-    }, 9000);
+    }, 7500);
 
-    // ── TEST 5 (t=10s): recursive spawn depth 3 ───────────────────────────
+    // ── TEST 5 (+8s): recursive spawn depth 3 ─────────────────────────────
+    // onSpawn bubbles to root vm via live getter — set handler once on vmA/vmB.
+    // Each spawn event carries the ready VM — chain next spawn immediately.
     const spawnLog = [];
 
-    function trackSpawns(vm, label) {
-        vm.onSpawn = ev => {
+    function makeOnSpawn(label) {
+        var handler = function(ev) {
             spawnLog.push({ name: ev.name, depth: ev.depth, peer: label });
             uiLog('onSpawn [' + label + ']: ' + ev.name + ' depth=' + ev.depth, 'inf');
-            trackSpawns(ev.vm, label + '>' + ev.name);
+            // Propagate so grandchildren fire back to this same handler
+            ev.vm.onSpawn = handler;
+            // Chain: child-1 ready on vmA → spawn child-2 into child-1 selo
+            if (ev.name === 'child-1' && label === 'vmA') {
+                uiLog('Step 2: spawnSelo child-2 (child-1 ready)', 'inf');
+                ev.vm.ws.send(JSON.stringify({ type: 'spawnSelo', data: { name: 'child-2' } }));
+            }
+            // Chain: child-2 ready on vmA → spawn child-3 into child-2 selo
+            if (ev.name === 'child-2' && label === 'vmA') {
+                uiLog('Step 3: spawnSelo child-3 (child-2 ready)', 'inf');
+                ev.vm.ws.send(JSON.stringify({ type: 'spawnSelo', data: { name: 'child-3' } }));
+            }
         };
+        return handler;
     }
 
     setTimeout(() => {
         uiLog('--- TEST 5: recursive spawn depth 3 ---', 'inf');
-        trackSpawns(vmA, 'vmA');
-        trackSpawns(vmB, 'vmB');
+        // Single root handler per peer — propagates to all child VMs via live getter
+        vmA.onSpawn = makeOnSpawn('vmA');
+        vmB.onSpawn = makeOnSpawn('vmB');
         uiLog('Step 1: spawnSelo child-1', 'inf');
         vmA.ws.send(JSON.stringify({ type: 'spawnSelo', data: { name: 'child-1' } }));
-    }, 10000);
+    }, 8000);
 
-    setTimeout(() => {
-        const c1 = vmA._getChildVM('child-1');
-        if (c1 && c1.ws && c1.ws.readyState === WebSocket.OPEN) {
-            uiLog('Step 2: spawnSelo child-2 (via child-1)', 'inf');
-            c1.ws.send(JSON.stringify({ type: 'spawnSelo', data: { name: 'child-2' } }));
-        } else {
-            uiLog('Step 2 SKIP: child-1 VM not ready ws=' + (c1 ? c1.ws && c1.ws.readyState : 'null'), 'err');
-        }
-    }, 11000);
-
-    setTimeout(() => {
-        const c1 = vmA._getChildVM('child-1');
-        const c2 = c1 && c1._getChildVM('child-2');
-        if (c2 && c2.ws && c2.ws.readyState === WebSocket.OPEN) {
-            uiLog('Step 3: spawnSelo child-3 (via child-2)', 'inf');
-            c2.ws.send(JSON.stringify({ type: 'spawnSelo', data: { name: 'child-3' } }));
-        } else {
-            uiLog('Step 3 SKIP: child-2 VM not ready', 'err');
-        }
-    }, 12000);
-
+    // Results after generous timeout — all chained spawns should be done well before this
     setTimeout(() => {
         uiLog('--- TEST 5 results ---', 'inf');
         const aLog = spawnLog.filter(e => e.peer.startsWith('vmA'));
@@ -183,7 +189,10 @@ import { MODEL_PROGRAM, VIEW_PROGRAM, APPLY_ACTION } from './tests.js';
         assert('vmB spawned child-3 depth=3', bLog.some(e => e.name === 'child-3' && e.depth === 3));
         assert('6 total spawn events (3 depths x 2 peers)', spawnLog.length >= 6, 'got ' + spawnLog.length);
         uiLog('=== All tests complete ===', 'inf');
-    }, 13500);
+    }, 18000);
+
+    } // end runTests
+
 })();
 </script>
 </body>

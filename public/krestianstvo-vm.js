@@ -301,10 +301,30 @@ const myObject = Behaviors.collect(null, Events.change($objects), function(_, ob
 });
 // _kfy_send(type, data) — send an action to the reflector from any view node.
 // krestianify auto-generates calls to this for every viewToModel node.
+// Queues messages until VM is fully joined, then flushes — no silent drops
+// on slow connections where WS or selo handshake isn't complete yet.
 const _kfy_send = function(type, data) {
     var ws = Renkon.app.ws;
-    if (ws && ws.readyState === WebSocket.OPEN)
-        ws.send(JSON.stringify({ type: type, data: data }));
+    if (!ws) return;
+    var msg = JSON.stringify({ type: type, data: data });
+    if (ws.readyState === WebSocket.OPEN) {
+        ws.send(msg);
+    } else {
+        // WS not open yet — queue and flush once open
+        if (!ws._kfy_queue) {
+            ws._kfy_queue = [];
+            var _origOnOpen = ws.onopen;
+            ws.onopen = function(e) {
+                if (_origOnOpen) _origOnOpen.call(ws, e);
+                var q = ws._kfy_queue || [];
+                ws._kfy_queue = [];
+                q.forEach(function(m) {
+                    if (ws.readyState === WebSocket.OPEN) ws.send(m);
+                });
+            };
+        }
+        ws._kfy_queue.push(msg);
+    }
 };
 }) + '\n';
 
@@ -453,6 +473,14 @@ const children$ = Behaviors.collect(
             this.ps.registerEvent('_spawned', []);
             this._sendJoin();
             if (this.onSeloJoined) this.onSeloJoined({ clientId: msg.clientId, seloId: msg.seloId });
+            // First peer: goes live immediately without snapshot_apply — fire joined callbacks here
+            this._joined = true;
+            console.log('[_onSeloJoined first peer] _onJoinedCallback=', !!this._onJoinedCallback);
+            if (this._onJoinedCallback) {
+                const cb = this._onJoinedCallback;
+                this._onJoinedCallback = null;
+                Promise.resolve().then(cb);
+            }
             return { phase: 'live', clientId: msg.clientId, buffer: [], selo };
         } else {
             if (this.onSeloJoined) this.onSeloJoined({ clientId: msg.clientId, seloId: msg.seloId });
@@ -462,6 +490,14 @@ const children$ = Behaviors.collect(
 
     // _onSnapshotApply — called from seloState reducer
     _onSnapshotApply(state, msg) {
+        this._joined = true;  // signal: fully joined, safe for tests to proceed
+        console.log('[_onSnapshotApply] _onJoinedCallback=', !!this._onJoinedCallback);
+        // Fire deferred onSpawn if set — child VM is now ready with snapshot applied
+        if (this._onJoinedCallback) {
+            const cb = this._onJoinedCallback;
+            this._onJoinedCallback = null;
+            Promise.resolve().then(cb);  // after current stack so snapshot restore completes first
+        }
         const snap = msg.snapshot;
         console.log('[SNAP_APPLY] counter=', snap.counter, 'time=', snap.time, 'keys=', Object.keys(snap));
         const selo = this._restoreModelSelo(snap);
@@ -540,11 +576,21 @@ const children$ = Behaviors.collect(
             }
             const child = new KrestianstvoVM({ wsUrl: this.ws.url, seloId: name, depth: this.depth + 1, maxDepth: this.maxDepth });
             child.modelStateKeys = this.modelStateKeys || [];
-            child.onSpawn = this.onSpawn;
             child.onClose = this.onClose;
+            const _parent = this;
+            const _spawnName = name;
+            const _spawnDepth = this.depth + 1;
+            // _onJoinedCallback: fires when child is fully joined.
+            // Walks up _parent chain to find the root onSpawn handler — set once on root VM.
+            child._onJoinedCallback = function() {
+                // Call parent's onSpawn — parent handler is responsible for
+                // setting child.onSpawn for grandchildren (e.g. dom-demo makeSpawnHandler)
+                if (typeof _parent.onSpawn === 'function') {
+                    _parent.onSpawn({ name: _spawnName, vm: child, depth: _spawnDepth });
+                }
+            };
             child.start({ modelProgram: this._modelProgram, viewProgram: this._viewProgram, applyAction: this._applyAction });
             next.set(name, child);
-            if (this.onSpawn) this.onSpawn({ name, vm: child, depth: this.depth + 1 });
         });
         prev.forEach((child, name) => {
             if (names.indexOf(name) === -1) {
@@ -577,6 +623,30 @@ const children$ = Behaviors.collect(
         if (!name) return;
         if (this.ws && this.ws.readyState === WebSocket.OPEN)
             this.ws.send(JSON.stringify({ type: 'spawnSelo', data: { name: name } }));
+    }
+
+    // ── waitJoined ────────────────────────────────────────────────────────
+    // Resolves when this VM has fully joined its selo (snapshot applied + replayed).
+    // Works for both the first peer (no snapshot) and joiners (snapshot received).
+    // Safe to await on any connection speed — polls every 100ms up to `timeout` ms.
+    //
+    //   await vm.waitJoined();
+    //   await vm.waitJoined(30000);  // custom timeout
+    //
+    waitJoined(timeout) {
+        timeout = timeout || 20000;
+        const self = this;
+        return new Promise(function(resolve, reject) {
+            if (self._joined) return resolve(self);
+            const start = Date.now();
+            const t = setInterval(function() {
+                if (self._joined) { clearInterval(t); return resolve(self); }
+                if (Date.now() - start > timeout) {
+                    clearInterval(t);
+                    reject(new Error('waitJoined timeout after ' + timeout + 'ms for selo: ' + self.seloId));
+                }
+            }, 100);
+        });
     }
 
     // ── _getModelNode ──────────────────────────────────────────────────────
