@@ -148,7 +148,7 @@ const renderer = Behaviors.collect(null, renderTick, function(_, __) {
     if (clockEl) clockEl.textContent = vTime || 0;
     if (peersEl) peersEl.textContent = Object.keys(objs).length;
     if (queueEl) queueEl.textContent = running ? 'T:' + cnt + ' S:' + sub : 'stopped';
-    console.log('[VIEW render]', { vTime, ticking, counter: cnt, subCounter: sub, randomResult, objects: objs });
+    //console.log('[VIEW render]', { vTime, ticking, counter: cnt, subCounter: sub, randomResult, objects: objs });
     UI.createPortalBar(rEl, {
         disabled: atMax,
         onInput: atMax ? null : function(value) {
