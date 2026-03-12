@@ -1,6 +1,10 @@
-// reflector.js
-// Krestianstvo - Renkon | SDK 4
-
+// reflector3_v7.js
+// Krestianstvo SDK 4
+// Changes from v6_v2:
+//   - joinWatcher no longer sends request_snapshot — join_selo handler does it
+//     atomically with pendingJoiners.set(). Eliminates double snapshot request
+//     which caused off-by-one counter on joiner (leader sent two snapshots,
+//     joiner got stale first one while leader advanced on second).
 import { ProgramState } from 'renkon-core';
 import express from 'express';
 import http from 'http';
@@ -50,6 +54,9 @@ function createSelo(seloId) {
         const pulse = Events.timer(50);
         const vTime = Events.collect(0, pulse, (t) => t + 50);
 
+        // Record wall-clock instant when each heartbeat fires into plain JS var.
+        // Used to interpolate true virtual time for client_msg stamps between hb ticks.
+        // Plain JS (not a Renkon node) so Date.now() is read at actual pulse-fire time.
         // 2. Network messages as async generator stream
         const networkMessagesGen = (async function* () {
             while (true) {
@@ -97,9 +104,19 @@ function createSelo(seloId) {
 
                     console.log(`[Selo ${app.seloId}] Processing client_msg from ${ev.from}`);
                     
+                    // Interpolate: last heartbeat vTime + wall-clock ms elapsed since
+                    // that pulse fired. Use ev._arrivedAt (stamped at WS onmessage) rather
+                    // than Date.now() — by the time the Renkon accumulator runs, the message
+                    // has already been through the async generator (microtask), so Date.now()
+                    // would always equal _hbBase.wall giving elapsed=0.
+                    const _b = app._hbBase || { vTime: 0, wall: Date.now() };
+                    const _arrivedAt = ev._arrivedAt || Date.now();
+                    const _elapsed = Math.max(0, _arrivedAt - _b.wall);
+                    const _interp = _b.vTime + Math.min(_elapsed, 49);
+
                     const stampedMessage = {
                         ...ev.data,
-                        serverTime: vTime,
+                        serverTime: _interp,
                         from: ev.from,
                         timestamp: ev.timestamp
                     };
@@ -169,7 +186,7 @@ function createSelo(seloId) {
             }
         );
 
-        // 4. TODO: The Journal (Sliding window of last 200 genuine move events) 
+        // 4. The Journal (Sliding window of last 200 genuine move events)
         // Excludes: snapshot_response (not a world event),
         //           connect {0,0} broadcasts (snapshot.objects already captures initial positions)
         const journal = Behaviors.collect(
@@ -242,7 +259,16 @@ function createSelo(seloId) {
             pulse,
             (state, _) => {
                 const currentTime = vTime;
-                
+                // Track wall-clock for client_msg stamp interpolation.
+                // Store the PREVIOUS heartbeat's wall time and vTime — messages arriving
+                // between hb N and hb N+1 will have arrivedAt >= prevWall, giving
+                // correct positive elapsed values.
+                const _now = Date.now();
+                app._hbBase = {
+                    vTime: app._hbNext ? app._hbNext.vTime : currentTime - 50,
+                    wall:  app._hbNext ? app._hbNext.wall  : _now
+                };
+                app._hbNext = { vTime: currentTime, wall: _now };
                 // Broadcast heartbeat every tick to advance virtual time
                 const syncData = {
                     type: 'heartbeat',
@@ -405,7 +431,8 @@ wss.on('connection', (ws, req) => {
                     type: 'client_msg',
                     from: clientId,
                     data: message,
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
+                    _arrivedAt: Date.now()   // wall-clock at actual WS message arrival
                 });
             } else {
                 ws.send(JSON.stringify({

@@ -110,7 +110,7 @@ const _moveDoc = Events.or(
 );
 
 // Throttle mousemove to 10fps — we don't want to flood the model with every pixel of movement.
-const _timerMove = Events.timer(100);
+const _timerMove = Events.timer(50);
 const _mouseCoords = {t: _timerMove, e: _moveDoc};
 
 const _sendMove = Behaviors.collect(null, Events.or(_mouseCoords, _clickDoc), function(_, pos) {

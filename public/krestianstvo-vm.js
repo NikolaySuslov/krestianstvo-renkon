@@ -69,8 +69,15 @@ const _vm_future = (currentTime, ms, type, data) => {
 
 const _vm_enqueue = (state, ev) => {
     if (!ev) return state;
-    if (ev.type === 'heartbeat')
-        return { ...state, time: Math.max(state.time, ev.vTime) };
+    if (ev.type === 'heartbeat') {
+        const next = { ...state, time: Math.max(state.time, ev.vTime) };
+        // Push vTime to viewPS here — _vm_drain only pushes when draining a queued
+        // message and returns early (same ref) for empty queue, so heartbeats would
+        // never reach the viewPS vTime display without this push.
+        if (app.viewPS && next.time !== state.time)
+            app.viewPS.registerEvent('vTime', next.time);
+        return next;
+    }
     if (ev.type === 'disconnect') {
         const objs = { ...state.objects };
         delete objs[ev.from];
@@ -471,6 +478,10 @@ const children$ = Behaviors.collect(
             this.modelPS = selo.ps;
             // Reset spawned children — new selo starts empty
             this.ps.registerEvent('_spawned', []);
+            // Reset viewPS time-sensitive receivers so stale values from previous
+            // session don't show (e.g. T still showing old vTime after page reload)
+            this.viewPS.registerEvent('vTime', 0);
+            this.viewPS.registerEvent('objects', {});
             this._sendJoin();
             if (this.onSeloJoined) this.onSeloJoined({ clientId: msg.clientId, seloId: msg.seloId });
             // First peer: goes live immediately without snapshot_apply — fire joined callbacks here
@@ -483,6 +494,9 @@ const children$ = Behaviors.collect(
             }
             return { phase: 'live', clientId: msg.clientId, buffer: [], selo };
         } else {
+            // Joiner: reset stale viewPS state immediately — snapshot will repopulate correctly
+            this.viewPS.registerEvent('vTime', 0);
+            this.viewPS.registerEvent('objects', {});
             if (this.onSeloJoined) this.onSeloJoined({ clientId: msg.clientId, seloId: msg.seloId });
             return { phase: 'buffering', clientId: msg.clientId, buffer: [] };
         }
