@@ -97,6 +97,10 @@ const _vm_drain = (s) => {
         .sort((a, b) => a.serverTime - b.serverTime);
     if (!ready.length) return s;  // same reference — no change — Events.change won't fire
     const msg = ready[0];
+    // Update _vTime to the exact serverTime of the message being drained so
+    // now() returns the correct non-quantised time inside applyAction accumulators.
+    if (app._vTime !== undefined) app._vTime = msg.serverTime;
+    console.log('[drain] msg.type=' + msg.type + ' serverTime=' + msg.serverTime + ' _future=' + !!msg._future + ' now()=' + app._vTime);
     const next = applyAction(s, msg);
     if (!next) { console.error('[drain] applyAction returned null for', msg.type); return s; }
     next._rngState = [_rngRef[0], _rngRef[1], _rngRef[2], _rngRef[3]];
@@ -723,6 +727,7 @@ const children$ = Behaviors.collect(
             }
             // Keep app._vTime current so now() works in model accumulator bodies
             psRef._vTime = t;
+            console.log('[_makeSend] ev.type=' + ev.type + ' envelope t=' + t);
             psRef._ps.registerEvent('_raw', ev);
             // evaluate x2: (1) enqueue into worldState, (2) drain worldState
             // drain also registerEvent(msg.type) for non-viewToModel types (tick, subTick etc.)
