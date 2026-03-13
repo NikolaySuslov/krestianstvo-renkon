@@ -1,32 +1,18 @@
-// reflector3_v7.js
-// Krestianstvo SDK 4
-// Changes from v6_v2:
-//   - joinWatcher no longer sends request_snapshot — join_selo handler does it
-//     atomically with pendingJoiners.set(). Eliminates double snapshot request
-//     which caused off-by-one counter on joiner (leader sent two snapshots,
-//     joiner got stale first one while leader advanced on second).
+// reflector.js — Krestianstvo SDK 4
+// Pure WebSocket reflector — no HTTP, no express.
+// Usage: import { attachReflector } from './reflector.js'; attachReflector(wss);
 import { ProgramState } from 'renkon-core';
-import express from 'express';
-import http from 'http';
-import { WebSocketServer } from 'ws';
 
 let lastTime = 0;
-
 global.requestAnimationFrame = (callback) => {
-  const currentTime = Number(process.hrtime.bigint() / 1000000n);
-  const delay = Math.max(0, 16 - (currentTime - lastTime));
-  
-  return setTimeout(() => {
-    lastTime = currentTime + delay;
-    callback(lastTime);
-  }, delay);
+    const currentTime = Number(process.hrtime.bigint() / 1000000n);
+    const delay = Math.max(0, 16 - (currentTime - lastTime));
+    return setTimeout(() => {
+        lastTime = currentTime + delay;
+        callback(lastTime);
+    }, delay);
 };
 
-const app = express();
-app.use(express.static('public'));
-const server = http.createServer(app);
-
-const wss = new WebSocketServer({ server });
 
 const clients = new Map();
 const selos = new Map();
@@ -329,6 +315,7 @@ function sendToSelo(seloId, eventData) {
     }
 }
 
+export function attachReflector(wss) {
 wss.on('connection', (ws, req) => {
     const clientId = `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     let currentSeloId = null;
@@ -467,8 +454,4 @@ wss.on('connection', (ws, req) => {
     });
 });
 
-server.listen(3000, () => {
-    console.log('Reflector server running at http://localhost:3000');
-    console.log('WebSocket server ready for connections');
-    console.log('Usage: Send { type: "join_selo", seloId: "your-selo-id" } to join a selo');
-});
+} // end attachReflector
