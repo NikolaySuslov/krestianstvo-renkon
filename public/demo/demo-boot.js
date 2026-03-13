@@ -1,4 +1,5 @@
 import { KrestianstvoVM } from '../krestianstvo-vm.js';
+import { registerVM } from '../vm-lifecycle.js';
 import { MODEL_PROGRAM, VIEW_PROGRAM, APPLY_ACTION, installDOMHandlers } from './dom-demo.js';
 
 const cfg = { modelProgram: MODEL_PROGRAM, viewProgram: VIEW_PROGRAM, applyAction: APPLY_ACTION };
@@ -19,15 +20,15 @@ function parseUrlParams() {
 function bootVM(rootEl, seloId, wsUrl, delay) {
     setTimeout(() => {
         const vm = new KrestianstvoVM({ seloId, wsUrl });
-        // All model state goes through modelStateKeys — uniform snapshot + viewPS push path
         vm.modelStateKeys = ['ticking', 'windows', 'randomResult', 'counter', 'subCounter'];
-        // Default world state for the first peer — joiners restore from snapshot instead
-        // vm.initialState = { ticking: false, counter: 0 };  // example — omit to use defaults
         installDOMHandlers(vm, rootEl);
         vm.start(cfg);
+        registerVM(vm);
     }, delay);
 }
 
 const { seloId, wsUrl } = parseUrlParams();
 bootVM(document.getElementById('vmA-root'), seloId, wsUrl, 0);
 bootVM(document.getElementById('vmB-root'), seloId, wsUrl, 350);
+
+

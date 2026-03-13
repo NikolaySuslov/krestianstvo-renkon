@@ -41,6 +41,7 @@ function createSelo(seloId) {
         selos: selos,
         seloId: seloId,
         // Message queue for this selo (fed by WebSocket handlers)
+        startTime: Date.now(),
         messageQueue: [],
         messageResolvers: [],
         pendingJoiners
@@ -49,78 +50,72 @@ function createSelo(seloId) {
     // Selo-specific reactive program
     function seloProgram() {
         const app = Renkon.app;
-        
-        // 1. Authoritative Clock (20Hz)
-        const pulse = Events.timer(50);
-        const vTime = Events.collect(0, pulse, (t) => t + 50);
 
-        // Record wall-clock instant when each heartbeat fires into plain JS var.
-        // Used to interpolate true virtual time for client_msg stamps between hb ticks.
-        // Plain JS (not a Renkon node) so Date.now() is read at actual pulse-fire time.
-        // 2. Network messages as async generator stream
-        const networkMessagesGen = (async function* () {
-            while (true) {
-                // Wait for next message from the queue
-                const message = await new Promise((resolve) => {
-                    if (app.messageQueue.length > 0) {
-                        resolve(app.messageQueue.shift());
-                    } else {
-                        app.messageResolvers.push(resolve);
-                    }
-                });
-                
-                console.log(`[Selo ${app.seloId}] 📩 Generator yielding:`, message.type);
-                yield message;
-            }
-        })();
-        
-        const networkMessagesRaw = Events.next(networkMessagesGen);
-        
-        // Extract value from generator result
-        const networkMessages = Behaviors.collect(
-            null,
-            networkMessagesRaw,
-            (_, result) => {
-                if (result && !result.done && result.value) {
-                    console.log(`[Selo ${app.seloId}] 📬 Extracted:`, result.value.type);
-                    return result.value;
-                }
-                return null;
+        // ── Clocks ──────────────────────────────────────────────────────────
+        // hb: 50ms heartbeat tick.
+        // timeForImmediate: receiver fired by sendToSelo for client_msg events.
+        // hbOrClMsg: single source of truth — fires on either, carries vTime stamp.
+        const hb = Events.timer(50);
+        const timeForImmediate = Events.receiver({ queued: true });
+
+        const hbOrClMsg = Events.collect(
+            { vTime: 0, isHb: true, ev: null, stamped: null },
+            Events.or(hb, timeForImmediate),
+            (_, ev) => {
+                const vTime = Date.now() - app.startTime;
+                const isHb  = typeof ev === 'number';
+                const stamped = isHb ? null : {
+                    ...ev.data,
+                    serverTime: vTime,
+                    from: ev.from,
+                    timestamp: ev.timestamp
+                };
+                return { vTime, isHb, ev, stamped };
             }
         );
 
-        // 3. IMMEDIATE ECHO - Stamp and broadcast incoming messages immediately
+        // vTime: wall-clock ms since selo start — same for HB and CM stamps.
+        const vTime = Behaviors.collect(0, Events.change($hbOrClMsg), (_, c) => c.vTime);
+
+        // ── Network messages (connect / disconnect / snapshot) ───────────────
+        // These are lower-frequency management events — generator stream is fine.
+        const networkMessagesGen = (async function* () {
+            while (true) {
+                const message = await new Promise((resolve) => {
+                    if (app.messageQueue.length > 0) resolve(app.messageQueue.shift());
+                    else app.messageResolvers.push(resolve);
+                });
+                yield message;
+            }
+        })();
+        const networkMessagesRaw = Events.next(networkMessagesGen);
+        const networkMessages = Behaviors.collect(
+            null, networkMessagesRaw,
+            (_, r) => (r && !r.done) ? r.value : null
+        );
+
+        // 3. IMMEDIATE ECHO
+        // client_msg: comes from hbOrClMsg (already stamped with serverTime=vTime).
+        // connect/disconnect/snapshot: come from networkMessages generator stream.
         const immediateEcho = Behaviors.collect(
             null,
-            networkMessages,
-            (_, ev) => {
-                // Echo client_msg with server timestamp
-                if (ev && ev.type === 'client_msg') {
-                    // snapshot_response is point-to-point (leader→server→joiner only).
-                    // Do not broadcast it to all peers and do not journal it.
-                    if (ev.data?.type === 'snapshot_response') {
-                        return null;
-                    }
+            Events.or(timeForImmediate, networkMessagesRaw),
+            (_, incoming) => {
+                // timeForImmediate is queued — may be array; networkMessagesRaw is a generator result
+                const isArr = Array.isArray(incoming);
+                const evList = isArr ? incoming
+                             : (incoming && incoming.value) ? [incoming.value]
+                             : incoming ? [incoming] : [];
+                if (!evList.length) return null;
+                let last = null;
+                for (const ev of evList) {
+                    if (!ev) continue;
 
-                    console.log(`[Selo ${app.seloId}] Processing client_msg from ${ev.from}`);
-                    
-                    // Interpolate: last heartbeat vTime + wall-clock ms elapsed since
-                    // that pulse fired. Use ev._arrivedAt (stamped at WS onmessage) rather
-                    // than Date.now() — by the time the Renkon accumulator runs, the message
-                    // has already been through the async generator (microtask), so Date.now()
-                    // would always equal _hbBase.wall giving elapsed=0.
-                    const _b = app._hbBase || { vTime: 0, wall: Date.now() };
-                    const _arrivedAt = ev._arrivedAt || Date.now();
-                    const _elapsed = Math.max(0, _arrivedAt - _b.wall);
-                    const _interp = _b.vTime + Math.min(_elapsed, 49);
-
+                if (ev.type === 'client_msg') {
+                    if (ev.data?.type === 'snapshot_response') { last = null; continue; }
                     const stampedMessage = {
-                        ...ev.data,
-                        serverTime: _interp,
-                        from: ev.from,
-                        timestamp: ev.timestamp
+                        ...ev.data, serverTime: Date.now() - app.startTime, from: ev.from, timestamp: ev.timestamp
                     };
-                    
                     const selo = app.selos.get(app.seloId);
                     if (selo) {
                         let sent = 0;
@@ -128,23 +123,17 @@ function createSelo(seloId) {
                             if (app.pendingJoiners.has(clientId)) { app.pendingJoiners.get(clientId).buffer.push({ type: 'client_msg', data: stampedMessage, from: ev.from }); return; }
                             const client = app.clients.get(clientId);
                             if (client && client.ws.readyState === 1) {
-                                client.ws.send(JSON.stringify({
-                                    type: 'client_msg',
-                                    data: stampedMessage,
-                                    from: ev.from
-                                }));
+                                client.ws.send(JSON.stringify({ type: 'client_msg', data: stampedMessage, from: ev.from }));
                                 sent++;
                             }
                         });
-                        console.log(`[Selo ${app.seloId}] ✅ Echoed to ${sent} clients at t=${vTime}`);
                     }
-                    
-                    return stampedMessage;
+                    last = stampedMessage; continue;
                 }
 
                 // Broadcast a stamped {0,0} move for the new client so all existing
                 // peers see the avatar appear immediately without waiting for a click.
-                if (ev && ev.type === 'connect') {
+                if (ev.type === 'connect') {
                     // Broadcast connect to all existing (non-pending) peers so they
                     // re-send their own _join. The new joiner is in pendingJoiners,
                     // so those _join re-announcements will be buffered for them and
@@ -160,11 +149,11 @@ function createSelo(seloId) {
                                 client.ws.send(msg);
                         });
                     }
-                    return null;
+                    last = null; continue;
                 }
 
                 // Broadcast disconnect so all clients can remove the avatar
-                if (ev && ev.type === 'disconnect') {
+                if (ev.type === 'disconnect') {
                     console.log(`[Selo ${app.seloId}] Broadcasting disconnect for ${ev.from}`);
                     const selo = app.selos.get(app.seloId);
                     if (selo) {
@@ -179,10 +168,10 @@ function createSelo(seloId) {
                             }
                         });
                     }
-                    return null;
+                    last = null; continue;
                 }
-
-                return null;
+                } // end for loop
+                return last;
             }
         );
 
@@ -246,6 +235,7 @@ function createSelo(seloId) {
                     targetClient.ws.send(JSON.stringify({type:'snapshot_apply',snapshot:ev.data.payload,history:[],seloId:app.seloId}));
                     const toFlush=pending.buffer.filter(m=>m.type==='heartbeat'?m.vTime>=snapTime:m.type==='client_msg'?(m.data?.serverTime??0)>=snapTime:true);
                     console.log('[Selo '+app.seloId+'] snapshot->'+targetId+' snapTime='+snapTime+' flushing '+toFlush.length+'/'+pending.buffer.length);
+                    console.log('[flush]', toFlush.map(m => m.type==='heartbeat' ? 'HB@'+m.vTime : 'CM@'+(m.data&&m.data.serverTime)));
                     for(const m of toFlush) targetClient.ws.send(JSON.stringify(m));
                     app.pendingJoiners.delete(targetId);
                 }
@@ -256,19 +246,9 @@ function createSelo(seloId) {
         // 7. Heartbeat Sync - Advances virtual time even without messages
         const syncBroadcaster = Events.collect(
             { lastTime: 0 },
-            pulse,
+            hb,
             (state, _) => {
-                const currentTime = vTime;
-                // Track wall-clock for client_msg stamp interpolation.
-                // Store the PREVIOUS heartbeat's wall time and vTime — messages arriving
-                // between hb N and hb N+1 will have arrivedAt >= prevWall, giving
-                // correct positive elapsed values.
-                const _now = Date.now();
-                app._hbBase = {
-                    vTime: app._hbNext ? app._hbNext.vTime : currentTime - 50,
-                    wall:  app._hbNext ? app._hbNext.wall  : _now
-                };
-                app._hbNext = { vTime: currentTime, wall: _now };
+                const currentTime = hbOrClMsg ? hbOrClMsg.vTime : (Date.now() - app.startTime);
                 // Broadcast heartbeat every tick to advance virtual time
                 const syncData = {
                     type: 'heartbeat',
@@ -279,7 +259,7 @@ function createSelo(seloId) {
                 const selo = app.selos.get(app.seloId);
                 if (selo) {
                     selo.clients.forEach((clientId) => {
-                        if (app.pendingJoiners.has(clientId)) { app.pendingJoiners.get(clientId).buffer.push(syncData); return; }
+                        if (app.pendingJoiners.has(clientId)) { app.pendingJoiners.get(clientId).buffer.push(syncData); console.log('[buffer HB] vTime='+syncData.vTime); return; }
                         const client = app.clients.get(clientId);
                         if (client && client.ws.readyState === 1) {
                             client.ws.send(JSON.stringify(syncData));
@@ -287,10 +267,7 @@ function createSelo(seloId) {
                     });
                 }
                 
-                // Log heartbeat every second for visibility
-                if (currentTime % 1000 === 0) {
-                    //console.log(`[Selo ${app.seloId}] Heartbeat at t=${currentTime}`);
-                }
+                console.log(`[reflector out] HB vTime=${currentTime} clients=${selo ? selo.clients.size : 0}`);
                 
                 return { lastTime: currentTime };
             }
@@ -299,7 +276,7 @@ function createSelo(seloId) {
         // 8. Status logger
         const statusLogger = Events.collect(
             0,
-            Behaviors.calm(pulse, 5000),
+            Behaviors.calm(hb, 5000),
             (count) => {
                 //console.log(`[Selo ${app.seloId}] Status: ${clientList.length} clients, ${journal.length} events in journal, t=${vTime}`);
                 return count + 1;
@@ -332,7 +309,7 @@ function cleanupSelo(seloId) {
     const selo = selos.get(seloId);
     if (selo && selo.clients.size === 0) {
         console.log(`Cleaning up empty selo: ${seloId}`);
-        selo.programState.stop();
+        try { selo.programState.stop(); } catch(e) { console.error('[cleanupSelo] stop() failed:', e); }
         selos.delete(seloId);
     }
 }
@@ -340,12 +317,14 @@ function cleanupSelo(seloId) {
 function sendToSelo(seloId, eventData) {
     const selo = selos.get(seloId);
     if (selo && selo.programState) {
-        // Feed into the async generator queue — the only path into the FRP graph
         const reflector = selo.programState.app;
-        if (reflector.messageResolvers.length > 0) {
-            reflector.messageResolvers.shift()(eventData);
+        if (eventData.type === 'client_msg' && eventData.data?.type !== 'snapshot_response') {
+            // Fire into timeForImmediate receiver — Events.or with hb, same vTime timeline.
+            selo.programState.registerEvent('timeForImmediate', eventData);
         } else {
-            reflector.messageQueue.push(eventData);
+            // connect / disconnect / snapshot go via generator queue
+            if (reflector.messageResolvers.length > 0) reflector.messageResolvers.shift()(eventData);
+            else reflector.messageQueue.push(eventData);
         }
     }
 }
@@ -409,16 +388,16 @@ wss.on('connection', (ws, req) => {
                     const memberIds = [...selo.clients].filter(id => id !== clientId);
                     const leaderId  = memberIds[0];
                     setTimeout(() => {
-                        const leaderClient = clients.get(leaderId);
-                        if (!leaderClient || !pendingJoiners.has(clientId)) return;
-                        if (leaderClient.ws.readyState === 1) {
-                            leaderClient.ws.send(JSON.stringify({
-                                type:       'request_snapshot',
-                                targetUser: clientId,
-                                seloId:     seloId
-                            }));
-                            console.log(`Requested snapshot from leader ${leaderId} for ${clientId}`);
-                        }
+                        if (!pendingJoiners.has(clientId)) return;
+                        const liveMember = memberIds.find(id => {
+                            const c = clients.get(id);
+                            return c && c.ws.readyState === 1;
+                        });
+                        if (!liveMember) { pendingJoiners.delete(clientId); return; }
+                        clients.get(liveMember).ws.send(JSON.stringify({
+                            type: 'request_snapshot', targetUser: clientId, seloId
+                        }));
+                        console.log(`Requested snapshot from leader ${liveMember} for ${clientId}`);
                     }, 50);
                 }
 
@@ -426,6 +405,23 @@ wss.on('connection', (ws, req) => {
                 return;
             }
             
+            if (message.type === 'goodbye') {
+                console.log(`[goodbye] client ${clientId} signing off from ${currentSeloId}`);
+                if (currentSeloId) {
+                    const selo = selos.get(currentSeloId);
+                    if (selo) {
+                        selo.clients.delete(clientId);
+                        pendingJoiners.delete(clientId);
+                        sendToSelo(currentSeloId, { type: 'disconnect', from: clientId, timestamp: Date.now() });
+                        cleanupSelo(currentSeloId);
+                    }
+                }
+                clients.delete(clientId);
+                currentSeloId = null;
+                ws.terminate();
+                return;
+            }
+
             if (currentSeloId) {
                 sendToSelo(currentSeloId, {
                     type: 'client_msg',
@@ -446,18 +442,21 @@ wss.on('connection', (ws, req) => {
     });
 
     ws.on('close', () => {
+        console.log(`[ws.close] client=${clientId} selo=${currentSeloId}`);
         if (currentSeloId) {
             const selo = selos.get(currentSeloId);
             if (selo) {
                 selo.clients.delete(clientId);
                 pendingJoiners.delete(clientId);
+                console.log(`Client ${clientId} disconnected from selo ${currentSeloId}, remaining clients: ${selo.clients.size}`);
                 sendToSelo(currentSeloId, {
                     type: 'disconnect',
                     from: clientId,
                     timestamp: Date.now()
                 });
-                console.log(`Client ${clientId} disconnected from selo ${currentSeloId}`);
                 cleanupSelo(currentSeloId);
+            } else {
+                console.log(`Client ${clientId} disconnected but selo ${currentSeloId} not found`);
             }
         }
         clients.delete(clientId);

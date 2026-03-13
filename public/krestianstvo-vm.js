@@ -118,8 +118,10 @@ const _vm_drain = (s) => {
             app._ps.registerEvent(msg.type, msg.data);
         }
         // Notify meta PS if spawned list changed
-        if (app.metaPS && next.spawned !== s.spawned)
+        if (app.metaPS && next.spawned !== s.spawned) {
+            console.log('[_makeSend] spawned changed:', s.spawned, '->', next.spawned);
             app.metaPS.registerEvent('_spawned', next.spawned.slice());
+        }
         if (app.viewPS && msg.type !== 'spawnSelo') {
             if (!app.viewEchoExclude || !app.viewEchoExclude.has(msg.type))
                 app.viewPS.registerEvent(msg.type, val);
@@ -388,6 +390,14 @@ class KrestianstvoVM {
         ws.onerror = e  => console.error('[VM] WS error:', e);
         ws.onclose = () => console.log('[VM] WS closed');
 
+        // Send goodbye synchronously — used by pagehide/visibilitychange
+        // so reflector can clean up even if TCP close frame is never sent.
+        this._sendGoodbye = () => {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'goodbye' }));
+            }
+        };
+
         // ── View PS ───────────────────────────────────────────────────────
         const viewApp = Object.assign({
             ws:    ws,
@@ -612,8 +622,8 @@ const children$ = Behaviors.collect(
         });
         prev.forEach((child, name) => {
             if (names.indexOf(name) === -1) {
-                console.log('[children$] closing:', name);
-                if (child.ws) child.ws.close();
+                console.log('[children$] closing:', name, 'ws?', !!child.ws, 'readyState?', child.ws && child.ws.readyState);
+                if (child.ws) { child.ws.close(); child.ws = null; }
                 next.delete(name);
                 if (this.onClose) this.onClose({ name });
             }

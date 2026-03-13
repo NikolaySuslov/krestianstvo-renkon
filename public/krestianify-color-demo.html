@@ -15,7 +15,7 @@ html, body { width: 100%; height: 100%; background: #111; font-family: monospace
   color: #aef;
   font-size: 13px;
   border-bottom: 1px solid #333;
-   align-items: center; gap: 16px;
+  display: flex; align-items: center; gap: 16px;
 }
 #header h1 { color: #cdf; }
 .hint { font-size: 11px; color: #556; }
@@ -84,6 +84,7 @@ html, body { width: 100%; height: 100%; background: #111; font-family: monospace
 
 <script type="module">
 import { KrestianstvoVM } from './krestianstvo-vm.js';
+import { registerVM } from './vm-lifecycle.js';
 import { ProgramState }   from 'https://cdn.jsdelivr.net/npm/renkon-core/dist/renkon-core.js';
 window.KrestianstvoVM = KrestianstvoVM;
 window.ProgramState   = ProgramState;
@@ -92,6 +93,7 @@ window.ProgramState   = ProgramState;
 
 <script type="module">
 import { KrestianstvoVM } from './krestianstvo-vm.js';
+import { registerVM } from './vm-lifecycle.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // THE USER'S RENKON PROGRAM
@@ -171,12 +173,14 @@ function bootVM(rootEl, label, seloId, wsUrl, delay) {
             viewProgram:  compiled.viewProgram,
             applyAction:  compiled.applyAction,
         });
+        registerVM(vm);
     }, delay);
 }
 
 const { seloId, wsUrl } = parseUrlParams();
 bootVM(document.getElementById('vmA-root'), 'peer A', seloId, wsUrl, 0);
 bootVM(document.getElementById('vmB-root'), 'peer B', seloId, wsUrl, 350);
+
 </script>
 </body>
 </html>

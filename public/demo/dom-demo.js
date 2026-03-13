@@ -148,7 +148,7 @@ const renderer = Behaviors.collect(null, renderTick, function(_, __) {
     if (clockEl) clockEl.textContent = vTime || 0;
     if (peersEl) peersEl.textContent = Object.keys(objs).length;
     if (queueEl) queueEl.textContent = running ? 'T:' + cnt + ' S:' + sub : 'stopped';
-    //console.log('[VIEW render]', { vTime, ticking, counter: cnt, subCounter: sub, randomResult, objects: objs });
+
     UI.createPortalBar(rEl, {
         disabled: atMax,
         onInput: atMax ? null : function(value) {
@@ -358,7 +358,10 @@ export function installDOMHandlers(vm, rootEl) {
 
             childVM.onClose = function(closeOpts) {
                 var childEl = el.querySelector('[data-selo-id="' + closeOpts.name + '"]');
-                if (childEl) childEl.remove();
+                if (childEl) {
+                    if (childEl._destroyDrag) childEl._destroyDrag();
+                    childEl.remove();
+                }
             };
 
             cbtn.addEventListener('click', function(e) {
@@ -374,6 +377,9 @@ export function installDOMHandlers(vm, rootEl) {
     // onClose: child removed from spawned[] in model
     vm.onClose = function(opts) {
         var childEl = rootEl.querySelector('[data-selo-id="' + opts.name + '"]');
-        if (childEl) childEl.remove();
+        if (childEl) {
+            if (childEl._destroyDrag) childEl._destroyDrag();
+            childEl.remove();
+        }
     };
 }

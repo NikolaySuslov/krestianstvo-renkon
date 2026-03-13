@@ -43,6 +43,7 @@ const KrestianstvoUI = (() => {
 
     function makeDraggable(el, handleEl, { onMove } = {}) {
         let ox = 0, oy = 0, mx = 0, my = 0, dragging = false;
+        let _lastMove = 0; // throttle to 20fps
 
         function startDrag(cx, cy) {
             dragging = true; mx = cx; my = cy;
@@ -51,10 +52,13 @@ const KrestianstvoUI = (() => {
         function moveDrag(cx, cy) {
             if (!dragging) return;
             const nx = ox + cx - mx, ny = oy + cy - my;
-            if (onMove) onMove(nx, ny);
+            const now = Date.now();
+            if (onMove && now - _lastMove >= 50) { _lastMove = now; onMove(nx, ny); }
             // Position is set by model confirmation (_winSync), not locally
         }
         function endDrag() { dragging = false; }
+        const _onMouseMove = e => moveDrag(e.clientX, e.clientY);
+        const _onMouseUp   = () => endDrag();
 
         // Mouse
         handleEl.addEventListener('mousedown', e => {
@@ -62,10 +66,16 @@ const KrestianstvoUI = (() => {
             startDrag(e.clientX, e.clientY);
             e.stopPropagation(); e.preventDefault();
         });
-        document.addEventListener('mousemove', e => moveDrag(e.clientX, e.clientY));
-        document.addEventListener('mouseup', endDrag);
+        document.addEventListener('mousemove', _onMouseMove);
+        document.addEventListener('mouseup',   _onMouseUp);
 
         // Touch
+        // destroy — call when window is closed to remove document-level listeners
+        el._destroyDrag = () => {
+            document.removeEventListener('mousemove', _onMouseMove);
+            document.removeEventListener('mouseup',   _onMouseUp);
+        };
+
         handleEl.addEventListener('touchstart', e => {
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
             const t = e.touches[0];

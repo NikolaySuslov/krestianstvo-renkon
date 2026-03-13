@@ -1,5 +1,5 @@
 // krestianify.js
-// Krestianstvo SDK 4 — Compiler
+// Krestianstvo VM | Renkon — Compiler
 //
 // Converts a unified Renkon app (single source string) into the
 // model/view split that KrestianstvoVM.start() expects.

@@ -14,7 +14,7 @@
       padding-right: max(14px, env(safe-area-inset-right));
       background: #16213e; color: #aef;
       font: 12px/1.5 monospace; border-bottom: 1px solid #334;
-      align-items: center; gap: 14px; flex-wrap: wrap;
+      display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
   }
   #header h1 { font-size: 13px; color: #cdf; white-space: nowrap; }
   .hint { font-size: 11px; color: #556; white-space: nowrap; }
@@ -53,6 +53,7 @@
 </div>
 <script type="module">
 import { KrestianstvoVM } from './krestianstvo-vm.js';
+import { registerVM } from './vm-lifecycle.js';
 import { installDOMHandlers } from './demo/dom-demo.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -155,12 +156,15 @@ function bootVM(rootEl, seloId, wsUrl, delay) {
             viewProgram:  finalViewProgram,
             applyAction:  APPLY_ACTION,
         });
+        registerVM(vm);
     }, delay);
 }
 
 const { seloId, wsUrl } = parseUrlParams();
 bootVM(document.getElementById('vmA-root'), seloId, wsUrl, 0);
 bootVM(document.getElementById('vmB-root'), seloId, wsUrl, 350);
+
+
 </script>
 </body>
 </html>
