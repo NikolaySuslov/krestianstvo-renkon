@@ -59,7 +59,7 @@ URL params for demo page:
 - [Portal System and Recursive Selos](#portal-system-and-recursive-selos)
 - [Krestianify — Automatic Model/View Split](#krestianify--automatic-modelview-split)
 - [VM Lifecycle and Clean Disconnection](#vm-lifecycle-and-clean-disconnection)
-- [Reflector3](#reflector3)
+- [Reflector](#reflector)
 - [Writing an App](#writing-an-app)
 - [Key Design Decisions](#key-design-decisions)
 - [URL Parameters](#url-parameters)

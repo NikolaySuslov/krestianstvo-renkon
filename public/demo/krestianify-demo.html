@@ -33,9 +33,9 @@
   }
 </style>
 <!-- krestianstvo-ui.js must load BEFORE the ES module -->
-<script src="./demo/krestianstvo-ui.js"></script>
+<script src="./krestianstvo-ui.js"></script>
 <!-- krestianify.js: depends only on ProgramState (from renkon-core via krestianstvo-vm.js) -->
-<script src="./krestianify.js"></script>
+<script src="../krestianify.js"></script>
 </head>
 <body>
 <div id="stage">
@@ -52,9 +52,9 @@
   </div>
 </div>
 <script type="module">
-import { KrestianstvoVM } from './krestianstvo-vm.js';
+import { KrestianstvoVM } from '../krestianstvo-vm.js';
 import { registerVM } from './vm-lifecycle.js';
-import { installDOMHandlers } from './demo/dom-demo.js';
+import { installDOMHandlers } from './dom-demo.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // UNIFIED APP — written as a plain Renkon program.
@@ -101,7 +101,7 @@ const MODEL_NODES = ['ticking', 'windows', 'randomResult', 'tick', 'subTick', 'c
 // The applyAction body is still explicit — it is pure JS state-machine logic,
 // not Renkon FRP, so it cannot be auto-split by the compiler.
 // (Same as dom-demo.js APPLY_ACTION.)
-import { APPLY_ACTION, VIEW_PROGRAM } from './demo/dom-demo.js';
+import { APPLY_ACTION, VIEW_PROGRAM } from './dom-demo.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // COMPILE

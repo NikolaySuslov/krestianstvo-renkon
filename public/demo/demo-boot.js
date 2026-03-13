@@ -1,5 +1,5 @@
 import { KrestianstvoVM } from '../krestianstvo-vm.js';
-import { registerVM } from '../vm-lifecycle.js';
+import { registerVM } from './vm-lifecycle.js';
 import { MODEL_PROGRAM, VIEW_PROGRAM, APPLY_ACTION, installDOMHandlers } from './dom-demo.js';
 
 const cfg = { modelProgram: MODEL_PROGRAM, viewProgram: VIEW_PROGRAM, applyAction: APPLY_ACTION };
