@@ -1,5 +1,5 @@
 // krestianify.js
-// Krestianstvo VM | Renkon — Compiler
+// Krestianstvo SDK 4 — Compiler
 //
 // Converts a unified Renkon app (single source string) into the
 // model/view split that KrestianstvoVM.start() expects.
@@ -64,7 +64,7 @@
 // ── This file is a pure compiler — no runtime dependency on krestianstvo-vm.js
 // ═══════════════════════════════════════════════════════════════════════════
 
-/* global ProgramState */
+import { _getProgramState } from './krestianstvo-core.js';
 
 // ── toFuncStr ──────────────────────────────────────────────────────────────
 // Wrap user code in a dummy function so ProgramState.getFunctionBody / findDecls
@@ -81,7 +81,7 @@ function _kfy_toFuncStr(code, name) {
 //   types    — Map<name, 'Event'|'Behavior'>
 
 function _kfy_probeDecls(userCode) {
-    var probe = new ProgramState(0);
+    var probe = new (_getProgramState())(0);
     probe.setLog(function() {});
     var parsed = probe.getFunctionBody(_kfy_toFuncStr(userCode));
     probe.setupProgram([parsed.output]);
@@ -128,6 +128,7 @@ function _kfy_findCrossDeps(allDecls, modelSet, viewSet) {
             if (m[1] !== d.name) refs.add(m[1]);
         }
         refs.forEach(function(ref) {
+            if (_KFY_VIEW_PREAMBLE_NAMES.has(ref)) return; // always available in view, not cross-boundary
             if (inModel && viewSet.has(ref))  viewToModel.add(ref);
             if (inView  && modelSet.has(ref)) modelToView.add(ref);
         });
@@ -153,6 +154,21 @@ function _kfy_findCrossDeps(allDecls, modelSet, viewSet) {
 //     types,          — Map<string,'Event'|'Behavior'>  (informational)
 //   }
 
+// Names always provided by VIEW_PREAMBLE — never cross-boundary stubs.
+// krestianify must not treat these as undefined view references when they
+// appear in model code, nor generate receiver stubs for them in the view.
+// Names always pre-declared by VM preambles — compiler must not generate
+// receiver stubs or cross-boundary wiring for these.
+// Model preamble: vTime, objects, clients (pushed to view after each drain)
+// View preamble:  clientIdentity, myObject, _kfy_send, Renkon
+var _KFY_VIEW_PREAMBLE_NAMES = new Set([
+    'vTime', 'objects', 'clients',                   // model→view, pushed directly by VM
+    'clientJoined', 'clientLeft', '_clientDiff',     // join/exit events, model→view
+    'clientIdentity', 'myObject',                    // view-only, per-client identity
+    '_kfy_send', 'Renkon',                           // view utilities
+    'uid', 'random', 'now', 'future',                  // model builtins — available everywhere
+]);
+
 function krestianify(userCode, modelNodes) {
     var modelSet = new Set(modelNodes);
 
@@ -167,6 +183,9 @@ function krestianify(userCode, modelNodes) {
     allDecls.forEach(function(d) {
         if (!modelSet.has(d.name)) viewSet.add(d.name);
     });
+    // Preamble names are always in the view — remove from viewSet so they
+    // don't get auto-generated receiver stubs (they already exist in VIEW_PREAMBLE).
+    _KFY_VIEW_PREAMBLE_NAMES.forEach(function(n) { viewSet.delete(n); });
 
     var modelDecls = allDecls.filter(function(d) { return modelSet.has(d.name); });
     var viewDecls  = allDecls.filter(function(d) { return viewSet.has(d.name); });
@@ -226,46 +245,49 @@ function krestianify(userCode, modelNodes) {
         );
     });
 
-    // ── 5b. Detect model-side Events.timer(N) nodes and replace with future() loops ──
-    // Events.timer(N) in the model must be deterministic — no browser clock.
-    // Pattern (from Croquetifier): seed one future() at init, then self-reschedule on each fire.
+    // ── 5b. Detect model-side Events.timer(N) nodes ─────────────────────────
+    // Events.timer(N) in the model is non-deterministic (browser clock) and
+    // must be replaced with a future()-based self-chaining receiver — same
+    // pattern as the balls demo _tick.
     //
-    // For each timer node named e.g. "tick" with interval N:
-    //   - Replace Events.timer(N) with Events.receiver()   ← fires when future msg arrives
-    //   - Inject _kfy_timer_init_tick: seeds future(vTime, N, 'tick', 1) once at worldState init
-    //   - Inject _kfy_timer_loop_tick: on each tick fire, reschedule future(vTime, N, 'tick', 1)
+    // For each model timer node named e.g. "timer" with interval N:
+    //   - Replace declaration with Events.receiver()
+    //   - Inject a _kfy_timerloop_<name> Behaviors.collect that:
+    //       • On first fire (any event that could start things): seeds the future
+    //       • On each timer fire: reschedules future(now(), N, name, 1)
+    //
+    // The node fires exactly as Events.timer would — any model node depending
+    // on it just works. The value delivered is 1 each tick (truthy counter).
 
     var modelTimerLines = [];
-    var timerApplyLines = [];  // applyAction snippets for timer rescheduling
-    var timerIntervals = {};  // name → interval ms
 
     modelDecls = modelDecls.map(function(d) {
         var m = d.code.match(/=\s*Events\.timer\s*\(\s*(\d+)\s*\)/);
         if (!m) return d;
         var interval = parseInt(m[1], 10);
-        timerIntervals[d.name] = interval;
-        // Seed: runs once when worldState first has a valid time
         var dn = JSON.stringify(d.name);
-        // Timer — purely in applyAction, single source of truth.
-        // Seed on _join (first peer = world init), reschedule on every tick arrival.
-        // Reschedule on every tick — applyAction has state.time
-        timerApplyLines.push(
-            'if (msg.type === ' + dn + ') {\n' +
-            '    future(state.time, ' + interval + ', ' + dn + ', 1);\n' +
-            '}'
-        );
-        // Seed: one-shot node. Guard against joiner double-seed by checking queue.
+        var rn = '_kfy_timerstart_' + d.name;
+        // Seed: fires once at model startup to kick off the chain.
+        // Uses Events.receiver() with no sender — fires on model PS init (initial value).
+        // Guard: checks queue so joiners don't double-seed.
         modelTimerLines.push(
-            'const _kfy_timer_seed_' + d.name + ' = Behaviors.collect(false, Events.change($worldState), function(done, ws) {\n' +
-            '    if (done || !ws || !ws.time) return done;\n' +
-            '    var already = (ws.queue || []).some(function(m) { return m.type === ' + dn + '; });\n' +
-            '    if (!already) future(ws.time, ' + interval + ', ' + dn + ', 1);\n' +
+            '// kfy: Events.timer(' + interval + ') → future() self-chain\n' +
+            'const _kfy_timerseed_' + d.name + ' = Behaviors.collect(false, Events.change($worldState), function(started, ws) {\n' +
+            '    if (started || !ws) return started;\n' +
+            '    var queued = (ws.queue || []).some(function(q) { return q.type === ' + dn + '; });\n' +
+            '    if (!queued) future(now(), ' + interval + ', ' + dn + ', 1);\n' +
+            '    return true;\n' +
+            '});\n' +
+            'const ' + rn + ' = Behaviors.collect(false, ' + d.name + ', function(_, __) {\n' +
+            '    future(now(), ' + interval + ', ' + dn + ', 1);\n' +
             '    return true;\n' +
             '});'
         );
-        // Replace with receiver stub
+        // Replace with receiver stub — future() delivers the tick
         return Object.assign({}, d, { code: 'const ' + d.name + ' = Events.receiver();' });
     });
+
+    var timerApplyLines = [];  // empty — no applyAction needed for timers
 
     // ── 6. Assemble final strings ──────────────────────────────────────────
     // Rewrite Behaviors.collect(INIT, ...) in model decls so the model PS restores
@@ -316,7 +338,7 @@ function krestianify(userCode, modelNodes) {
         modelToView:     modelToView,
         viewToModel:     viewToModel,
         types:           types,
-        applyAction:     timerApplyLines.join('\n'),  // timer rescheduling injected here
+        applyAction:     '',  // timers handled via future() in modelProgram, no applyAction needed
     };
 }
 
@@ -365,11 +387,4 @@ function krestianifyBoot(opts) {
 }
 
 // ── exports ────────────────────────────────────────────────────────────────
-// Works both as a plain <script> (globals) and as an ES module.
-
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { krestianify, krestianifyBoot };
-} else if (typeof window !== 'undefined') {
-    window.krestianify     = krestianify;
-    window.krestianifyBoot = krestianifyBoot;
-}
+export { krestianify, krestianifyBoot };

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Krestianify — Incr/Decr Counter</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 100%; height: 100%; background: #111; font-family: monospace; }
+#stage { width: 100%; height: 100dvh; display: flex; flex-direction: column; }
+#header {
+  flex: 0 0 auto; padding: 8px 16px;
+  background: #1a1a2e; color: #aef; font-size: 13px;
+  border-bottom: 1px solid #333;
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+}
+#header h1 { color: #cdf; }
+.hint { font-size: 11px; color: #556; }
+#vms { flex: 1; display: flex; min-height: 0; }
+.vm-pane { flex: 1; border-right: 1px solid #333; position: relative; overflow: hidden; }
+.vm-pane:last-child { border-right: none; }
+.vm-root {
+  position: absolute; inset: 0; background: #f5f5f8;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 20px; padding: 24px;
+}
+/* App styles — the DOM the user's Renkon program targets */
+#renkon { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+#count  { font-size: 72px; font-weight: bold; color: #223; letter-spacing: -2px; }
+#incr, #decr {
+  font-size: 28px; width: 60px; height: 60px;
+  border-radius: 10px; border: 2px solid #aab;
+  background: #fff; cursor: pointer;
+}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="header">
+    <h1>Krestianify — Incr/Decr Counter</h1>
+    <span class="hint">One Renkon program → model nodes declared → done</span>
+    <span class="hint" style="margin-left:auto">Two peers · same reflector</span>
+  </div>
+  <div id="vms">
+    <div class="vm-pane"><div id="vmA-root" class="vm-root"></div></div>
+    <div class="vm-pane"><div id="vmB-root" class="vm-root"></div></div>
+  </div>
+</div>
+
+
+
+<script type="module">
+import { selo } from '../index.js';
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THE USER'S RENKON PROGRAM — exactly as written, nothing added.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const APP = `
+const tick    = Events.timer(1000);
+const change  = Events.or(incr, decr, tick);
+const counter = Behaviors.collect(0, change, (prev, ch) => prev + ch);
+
+const incr = Events.listener(Renkon.app.rootEl.querySelector("#incr"), "click", (evt) => 1);
+const decr = Events.listener(Renkon.app.rootEl.querySelector("#decr"), "click", (evt) => -1);
+
+const _render = Behaviors.collect(null, counter, (_, n) => {
+    Renkon.app.rootEl.querySelector("#count").textContent = n;
+    return null;
+});
+`;
+
+const MODEL_NODES = ['counter', 'change', 'tick'];
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COMPILE — krestianify splits the program automatically:
+//
+//   model PS gets:
+//     const incr   = Events.receiver();   ← stub, receives ws msg
+//     const decr   = Events.receiver();   ← stub, receives ws msg
+//     const change = Events.or(incr, decr);
+//     const counter = Behaviors.collect(0, change, (prev, ch) => prev + ch);
+//
+//   view PS gets:
+//     const counter = Behaviors.receiver();  ← stub, receives modelStateKeys push
+//     const incr = Events.listener(...);
+//     const decr = Events.listener(...);
+//     const _render = Behaviors.collect(...);
+//     const _kfy_send_incr = Behaviors.collect(null, incr, (_, v) => { _kfy_send("incr", v); ... });
+//     const _kfy_send_decr = Behaviors.collect(null, decr, (_, v) => { _kfy_send("decr", v); ... });
+// ═══════════════════════════════════════════════════════════════════════════
+// BOOT
+// ═══════════════════════════════════════════════════════════════════════════
+
+
+const buildUI = (rootEl, label) => {
+    rootEl.innerHTML = `
+        <span style="font-size:11px;color:#889">${label}</span>
+        <div id="renkon">
+            <div id="count">0</div>
+            <div style="display:flex;gap:12px">
+                <button id="incr">+</button>
+                <button id="decr">−</button>
+            </div>
+        </div>
+    `;
+};
+selo({ app: APP, modelNodes: MODEL_NODES, seloId: 'kfy-incr', reflector: 'ws://localhost:3000', rootEl: document.getElementById('vmA-root'), label: 'peer A', delay: 0,   buildUI });
+selo({ app: APP, modelNodes: MODEL_NODES, seloId: 'kfy-incr', reflector: 'ws://localhost:3000', rootEl: document.getElementById('vmB-root'), label: 'peer B', delay: 350, buildUI });
+
+</script>
+</body>
+</html>

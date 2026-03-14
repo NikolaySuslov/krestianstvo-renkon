@@ -1,7 +1,7 @@
 // krestianstvo-vm.js
 // Krestianstvo - Renkon | SDK 4 — Pure Renkon FRP VM
 
-import { ProgramState } from 'https://cdn.jsdelivr.net/npm/renkon-core/dist/renkon-core.js';
+import { _getProgramState } from './krestianstvo-core.js';
 //
 // Architecture:
 //   KrestianstvoVM.ps  — meta ProgramState; the VM IS a Renkon program:
@@ -127,6 +127,13 @@ const _vm_drain = (s) => {
                 app.viewPS.registerEvent(msg.type, val);
             // Push objects + vTime directly from worldState — always current after drain
             if (next.objects !== s.objects) app.viewPS.registerEvent('objects', next.objects);
+            if (next.objects !== s.objects) {
+                var _nextClients = Object.keys(next.objects || {}).sort();
+                var _prevClients = Object.keys(s.objects || {}).sort();
+                app.viewPS.registerEvent('clients',      _nextClients);
+                app.viewPS.registerEvent('clientJoined', _nextClients.filter(function(id) { return _prevClients.indexOf(id) === -1; }));
+                app.viewPS.registerEvent('clientLeft',   _prevClients.filter(function(id) { return _nextClients.indexOf(id) === -1; }));
+            }
             if (next.time   !== s.time)    app.viewPS.registerEvent('vTime',   next.time);
             // modelStateKeys are pushed to viewPS in _makeSend after FRP propagation —
             // not here in drain, to avoid pushing stale PS node initial values (e.g. counter=0)
@@ -269,6 +276,21 @@ const worldState = Behaviors.collect(
 // Core projections — seeded from _initialState so snapshot restore reads correctly
 const vTime   = Behaviors.collect((_initialState && _initialState.time)    || 0,  Events.change($worldState), (_, s) => s ? s.time    : 0);
 const objects = Behaviors.collect((_initialState && _initialState.objects) || {}, Events.change($worldState), (_, s) => s ? s.objects : {});
+// clients — sorted array of clientIds currently in the selo, derived from objects
+const clients = Behaviors.collect([], Events.change($objects), (_, objs) => objs ? Object.keys(objs).sort() : []);
+// clientJoined — array of clientIds that just joined (fires on each objects change)
+// clientLeft   — array of clientIds that just left
+const _clientDiff = Behaviors.collect(
+    { prev: [], joined: [], left: [] },
+    Events.change($clients),
+    (state, curr) => {
+        var joined = curr.filter(function(id) { return state.prev.indexOf(id) === -1; });
+        var left   = state.prev.filter(function(id) { return curr.indexOf(id) === -1; });
+        return { prev: curr, joined: joined, left: left };
+    }
+);
+const clientJoined = Behaviors.collect([], Events.change($_clientDiff), (_, d) => d.joined);
+const clientLeft   = Behaviors.collect([], Events.change($_clientDiff), (_, d) => d.left);
     });
 
 
@@ -285,6 +307,16 @@ const objects = Behaviors.collect((_initialState && _initialState.objects) || {}
         'app._rngRef = _rngRef;',
         'const random = () => _xoroshiroNext(_rngRef);',
         'const now    = () => app._vTime || 0;',
+        // uid(prefix?) — deterministic short ID using random(), same on all peers.
+        // Uses full 53-bit mantissa of each random() call encoded in base36.
+        // 2 × 53 = 106 bits of entropy, 22 chars — close to UUID v4 (122 bits).
+        // Deterministic: uses shared PRNG, identical result on all peers.
+        // Optional prefix e.g. uid("ball") → "ball_4f7x2m9k1z3p8"
+        'const uid = (prefix) => {' +
+        '    var a = Math.floor(random() * 0x20000000000000).toString(36).padStart(11, "0");' +
+        '    var b = Math.floor(random() * 0x20000000000000).toString(36).padStart(11, "0");' +
+        '    return (prefix ? prefix + "_" : "") + a + b;' +
+        '};',
         futureSrc,
         applyActionSrc,
         enqueueSrc,
@@ -308,10 +340,16 @@ const VIEW_PREAMBLE = _viewSrc(function() {
 const clientIdentity = Behaviors.collect({clientId:null,seloId:null}, Events.receiver(), function(_,id){return id;});
 const objects        = Behaviors.collect({},   Events.receiver(), function(_,v){return v;});
 const vTime          = Behaviors.collect(0,    Events.receiver(), function(_,v){return v;});
+// clients — pushed from model alongside objects; sorted array of clientIds in the selo
+const clients        = Behaviors.collect([], Events.receiver(), function(_,v){return v || [];});
+// clientJoined / clientLeft — arrays of ids that joined/left since last objects change
+const clientJoined   = Behaviors.collect([], Events.receiver(), function(_,v){return v || [];});
+const clientLeft     = Behaviors.collect([], Events.receiver(), function(_,v){return v || [];});
 const myObject = Behaviors.collect(null, Events.change($objects), function(_, objs) {
     const id = clientIdentity && clientIdentity.clientId;
     return id ? ((objs && objs[id]) || null) : null;
 });
+
 // _kfy_send(type, data) — send an action to the reflector from any view node.
 // krestianify auto-generates calls to this for every viewToModel node.
 // Queues messages until VM is fully joined, then flushes — no silent drops
@@ -347,7 +385,7 @@ const _kfy_send = function(type, data) {
 
 class KrestianstvoVM {
 
-    constructor({ wsUrl = 'ws://localhost:3000', seloId = 'default', depth = 0, maxDepth = 5 } = {}) {
+    constructor({ wsUrl, seloId = 'default', depth = 0, maxDepth = 5 } = {}) {
         this.wsUrl        = wsUrl;
         this.seloId       = seloId;
         this.depth        = depth;
@@ -408,14 +446,14 @@ class KrestianstvoVM {
                 self._emitSpawn(name);
             }
         }, self.viewAppExtra || {});
-        this.viewPS = new ProgramState(Date.now(), viewApp, true);
+        this.viewPS = new (_getProgramState())(Date.now(), viewApp, true);
         this.viewPS.setupProgram([VIEW_PREAMBLE + this._viewProgram]);
         this.viewPS.evaluator(Date.now());
         if (this.onViewPSReady) this.onViewPSReady(this.viewPS);
 
         // ── Meta PS ───────────────────────────────────────────────────────
         const metaApp = { vm: this, wsStream: _makeWsStream(ws), VM: KrestianstvoVM };
-        this.ps       = new ProgramState(Date.now(), metaApp, true);
+        this.ps       = new (_getProgramState())(Date.now(), metaApp, true);
         this.ps.setupProgram([this._buildMetaProgram()]);
 
         ws.onopen = function() {
@@ -496,6 +534,9 @@ const children$ = Behaviors.collect(
             // session don't show (e.g. T still showing old vTime after page reload)
             this.viewPS.registerEvent('vTime', 0);
             this.viewPS.registerEvent('objects', {});
+            this.viewPS.registerEvent('clients', []);
+            this.viewPS.registerEvent('clientJoined', []);
+            this.viewPS.registerEvent('clientLeft', []);
             this._sendJoin();
             if (this.onSeloJoined) this.onSeloJoined({ clientId: msg.clientId, seloId: msg.seloId });
             // First peer: goes live immediately without snapshot_apply — fire joined callbacks here
@@ -511,6 +552,9 @@ const children$ = Behaviors.collect(
             // Joiner: reset stale viewPS state immediately — snapshot will repopulate correctly
             this.viewPS.registerEvent('vTime', 0);
             this.viewPS.registerEvent('objects', {});
+            this.viewPS.registerEvent('clients', []);
+            this.viewPS.registerEvent('clientJoined', []);
+            this.viewPS.registerEvent('clientLeft', []);
             if (this.onSeloJoined) this.onSeloJoined({ clientId: msg.clientId, seloId: msg.seloId });
             return { phase: 'buffering', clientId: msg.clientId, buffer: [] };
         }
@@ -533,6 +577,9 @@ const children$ = Behaviors.collect(
         selo.ps.evaluate(snap.time || 0);
         // Push objects + vTime directly from snapshot — fundamental, always present
         this.viewPS.registerEvent('objects', snap.objects || {});
+        this.viewPS.registerEvent('clients', Object.keys(snap.objects || {}).sort());
+        this.viewPS.registerEvent('clientJoined', []);
+        this.viewPS.registerEvent('clientLeft', []);
         this.viewPS.registerEvent('vTime',   snap.time   || 0);
         // Push modelStateKeys AFTER restoreModelSelo+evaluate so drain cannot overwrite them
         (this.modelStateKeys || []).forEach(k => {
@@ -567,6 +614,9 @@ const children$ = Behaviors.collect(
             var _wss = _self._getModelNode(selo.ps, 'worldState');
             if (_wss) {
                 _self.viewPS.registerEvent('objects', _wss.objects || {});
+                _self.viewPS.registerEvent('clients', Object.keys(_wss.objects || {}).sort());
+                _self.viewPS.registerEvent('clientJoined', []);
+                _self.viewPS.registerEvent('clientLeft', []);
                 _self.viewPS.registerEvent('vTime',   _wss.time   || 0);
             }
             var _msp = (selo.appRef && selo.appRef._modelStatePrev) || {};
@@ -602,7 +652,7 @@ const children$ = Behaviors.collect(
                 console.warn('[VM] max depth reached (' + this.maxDepth + '), not spawning:', name);
                 return;
             }
-            const child = new KrestianstvoVM({ wsUrl: this.ws.url, seloId: name, depth: this.depth + 1, maxDepth: this.maxDepth });
+            const child = new KrestianstvoVM({ wsUrl: this.wsUrl, seloId: name, depth: this.depth + 1, maxDepth: this.maxDepth });
             child.modelStateKeys = this.modelStateKeys || [];
             child.onClose = this.onClose;
             const _parent = this;
@@ -611,6 +661,11 @@ const children$ = Behaviors.collect(
             // _onJoinedCallback: fires when child is fully joined.
             // Walks up _parent chain to find the root onSpawn handler — set once on root VM.
             child._onJoinedCallback = function() {
+                // Auto-register child with vm-lifecycle so goodbye is sent on navigation.
+                // Must happen before onSpawn so the wrapper is in place before app code runs.
+                if (typeof _parent._registerChildVM === 'function') {
+                    _parent._registerChildVM(child);
+                }
                 // Call parent's onSpawn — parent handler is responsible for
                 // setting child.onSpawn for grandchildren (e.g. dom-demo makeSpawnHandler)
                 if (typeof _parent.onSpawn === 'function') {
@@ -737,7 +792,7 @@ const children$ = Behaviors.collect(
             }
             // Keep app._vTime current so now() works in model accumulator bodies
             psRef._vTime = t;
-            console.log('[_makeSend] ev.type=' + ev.type + ' envelope t=' + t);
+            //console.log('[_makeSend] ev.type=' + ev.type + ' envelope t=' + t);
             psRef._ps.registerEvent('_raw', ev);
             // evaluate x2: (1) enqueue into worldState, (2) drain worldState
             // drain also registerEvent(msg.type) for non-viewToModel types (tick, subTick etc.)
@@ -812,7 +867,7 @@ const children$ = Behaviors.collect(
             })(this.modelStateKeys || [], initialState),
         };
         var modelSrc = buildModelPreamble(this._applyAction) + '\n' + this._modelProgram;
-        var ps = new ProgramState(initialTime, appRef, true);
+        var ps = new (_getProgramState())(initialTime, appRef, true);
         appRef._ps = ps;
         ps.setLog((msg, ...args) => { if (msg && (msg.includes('cycle') || msg.includes('undefined') || msg.includes("won't"))) console.warn('[modelPS]', msg, ...args); });
         try {
@@ -837,3 +892,17 @@ const children$ = Behaviors.collect(
 }
 
 export { KrestianstvoVM };
+
+// ── URL params ─────────────────────────────────────────────────────────────
+
+// parseUrlParams(seloId, reflector) — optionally overrides with ?k= and ?r= from URL.
+// seloId and reflector are required — no fallback defaults.
+export function parseUrlParams(seloId, reflector) {
+    const p = new URLSearchParams(window.location.search);
+    const k = p.get('k');
+    const r = p.get('r');
+    return {
+        seloId:    k || seloId,
+        reflector: r ? r.replace(/^https:\/\//, 'wss://').replace(/^http:\/\//, 'ws://') : reflector,
+    };
+}

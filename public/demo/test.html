@@ -18,7 +18,8 @@
 <div id="log"></div>
 
 <script type="module" is:inline>
-import { KrestianstvoVM } from '../krestianstvo-vm.js';
+import { KrestianstvoVM } from '../index.js';
+
 import { MODEL_PROGRAM, VIEW_PROGRAM, APPLY_ACTION } from './tests.js';
 (async () => {
 
@@ -51,8 +52,8 @@ import { MODEL_PROGRAM, VIEW_PROGRAM, APPLY_ACTION } from './tests.js';
     // ── boot ──────────────────────────────────────────────────────────────
     const cfg = { modelProgram: MODEL_PROGRAM, viewProgram: VIEW_PROGRAM, applyAction: APPLY_ACTION };
 
-    const vmA = new KrestianstvoVM({ seloId: 'test-selo' });
-    const vmB = new KrestianstvoVM({ seloId: 'test-selo' });
+    const vmA = new KrestianstvoVM({ seloId: 'test-selo', wsUrl: 'ws://localhost:3000' });
+    const vmB = new KrestianstvoVM({ seloId: 'test-selo', wsUrl: 'ws://localhost:3000' });
     const modelStateKeys = ['ticking', 'randomResult', 'counter', 'subCounter'];
     vmA.modelStateKeys = modelStateKeys;
     vmB.modelStateKeys = modelStateKeys;

@@ -1,12 +1,67 @@
 {
   "name": "krestianstvo-renkon",
-  "version": "0.0.1",
-  "main": "server.js",
-  "dependencies": {
-    "ws": "^8.19.0",
-    "renkon-core": "0.10.7"
+  "version": "0.1.0",
+  "description": "Croquet-TeaTime-inspired, Renkon-driven collaborative computational engine",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./public/index.js"
+    },
+    "./vm": {
+      "import": "./public/krestianstvo-vm.js"
+    },
+    "./krestianify": {
+      "import": "./public/krestianify.js"
+    },
+    "./core": {
+      "import": "./public/krestianstvo-core.js"
+    },
+    "./lifecycle": {
+      "import": "./public/vm-lifecycle.js"
+    }
   },
+  "main": "./public/index.js",
+  "files": [
+    "public/renkon-core-0.10.7.js",
+    "public/krestianstvo-core.js",
+    "public/krestianstvo-vm.js",
+    "public/krestianify.js",
+    "public/vm-lifecycle.js",
+    "public/index.js",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "node server.js --port 3000 --root ./public",
+    "pub": "npm publish --access public"
+  },
+  "keywords": [
+    "renkon",
+    "frp",
+    "multiplayer",
+    "collaborative",
+    "croquet",
+    "virtual-time",
+    "websocket",
+    "reactive",
+    "deterministic"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.0.0"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/NikolaySuslov/krestianstvo-renkon"
+  },
+  "homepage": "https://renkon.krestianstvo.org",
+  "bugs": {
+    "url": "https://github.com/NikolaySuslov/krestianstvo-renkon/issues"
   }
 }

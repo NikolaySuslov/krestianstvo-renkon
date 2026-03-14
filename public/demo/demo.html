@@ -14,7 +14,7 @@
       padding-right: max(14px, env(safe-area-inset-right));
       background: #16213e; color: #aef;
       font: 12px/1.5 monospace; border-bottom: 1px solid #334;
-     align-items: center; gap: 14px;
+      display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
   }
   #header h1 { font-size: 13px; color: #cdf; white-space: nowrap; }
   .hint { font-size: 11px; color: #556; white-space: nowrap; }
@@ -31,12 +31,12 @@
   }
 </style>
 <!-- krestianstvo-ui.js must load BEFORE the ES module (demo-boot.js) -->
-<script src="./krestianstvo-ui.js"></script>
+<script src="./krestianstvo-ui.js?v=45"></script>
 </head>
 <body>
 <div id="stage">
   <div id="header">
-    <h1>Krestianstvo - Renkon | VM Demo</h1>
+    <h1>Krestianstvo VM2 — DOM Demo</h1>
     <span class="hint">Click canvas → move avatar</span>
     <span class="hint">Space → toggle tick</span>
     <span class="hint">Portal bar → open child selos</span>
@@ -47,6 +47,6 @@
     <div class="vm-pane"><div id="vmB-root" class="vm-root"></div></div>
   </div>
 </div>
-<script type="module" src="./demo-boot.js"></script>
+<script type="module" src="./demo-boot.js?v=45"></script>
 </body>
 </html>

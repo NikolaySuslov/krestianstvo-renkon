@@ -253,7 +253,7 @@ function createSelo(seloId) {
                     });
                 }
                 
-                console.log(`[reflector out] HB vTime=${currentTime} clients=${selo ? selo.clients.size : 0}`);
+                //console.log(`[reflector out] HB vTime=${currentTime} clients=${selo ? selo.clients.size : 0}`);
                 
                 return { lastTime: currentTime };
             }

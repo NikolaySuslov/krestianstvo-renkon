@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Krestianify — Incr/Decr Counter</title>
+<title>Krestianify — Counter + Timer</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { width: 100%; height: 100%; background: #111; font-family: monospace; }
@@ -24,21 +24,14 @@ html, body { width: 100%; height: 100%; background: #111; font-family: monospace
   display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 20px; padding: 24px;
 }
-/* App styles — the DOM the user's Renkon program targets */
-#renkon { display: flex; flex-direction: column; align-items: center; gap: 16px; }
-#count  { font-size: 72px; font-weight: bold; color: #223; letter-spacing: -2px; }
-#incr, #decr {
-  font-size: 28px; width: 60px; height: 60px;
-  border-radius: 10px; border: 2px solid #aab;
-  background: #fff; cursor: pointer;
-}
 </style>
 </head>
 <body>
 <div id="stage">
   <div id="header">
-    <h1>Krestianify — Incr/Decr Counter</h1>
-    <span class="hint">One Renkon program → model nodes declared → done</span>
+    <h1>Krestianify — Counter + Timer</h1>
+    <span class="hint">+/− click → shared counter</span>
+    <span class="hint">Start/Stop → +1/s · 9 subticks/s · all via <code>future()</code> in model</span>
     <span class="hint" style="margin-left:auto">Two peers · same reflector</span>
   </div>
   <div id="vms">
@@ -48,113 +41,92 @@ html, body { width: 100%; height: 100%; background: #111; font-family: monospace
 </div>
 
 <script type="module">
-import { KrestianstvoVM } from '../krestianstvo-vm.js';
-import { registerVM } from './vm-lifecycle.js';
-import { ProgramState }   from 'https://cdn.jsdelivr.net/npm/renkon-core/dist/renkon-core.js';
-window.KrestianstvoVM = KrestianstvoVM;
-window.ProgramState   = ProgramState;
-</script>
-<script src="../krestianify.js"></script>
+import { selo } from '../index.js';
 
-<script type="module">
-import { KrestianstvoVM } from '../krestianstvo-vm.js';
-import { registerVM } from './vm-lifecycle.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// THE USER'S RENKON PROGRAM — exactly as written, nothing added.
+// THE APP — one Renkon program, model/view split by MODEL_NODES.
+//
+// The timer lives entirely in the model as a future()-based self-chaining
+// tick — same pattern as the balls demo. No view sends, no APPLY_ACTION,
+// no manual WebSocket calls. Each tick fires at the same virtual time on
+// all peers → fully deterministic.
 // ═══════════════════════════════════════════════════════════════════════════
 
 const APP = `
-const tick    = Events.timer(1000);
-const change  = Events.or(incr, decr, tick);
-const counter = Behaviors.collect(0, change, (prev, ch) => prev + ch);
+// ── MODEL ──────────────────────────────────────────────────────────────────
 
-const incr = Events.listener(Renkon.app.rootEl.querySelector("#incr"), "click", (evt) => 1);
-const decr = Events.listener(Renkon.app.rootEl.querySelector("#decr"), "click", (evt) => -1);
+// running — toggled by start/stop button, starts false
+const running = Behaviors.collect(false, toggle, (prev, _) => {
+    var next = !prev;
+    if (next) future(now(), 1000, '_tick', { type: '_tick' });
+    return next;
+});
 
-const _render = Behaviors.collect(null, counter, (_, n) => {
-    Renkon.app.rootEl.querySelector("#count").textContent = n;
+// _tick — fires every 1s, schedules 9 subticks at 100ms intervals within the second
+const _tick    = Events.receiver();
+const _subTick = Events.receiver();
+
+const _tickLoop = Behaviors.collect(null, _tick, (_, __) => {
+    if (!running) return null;
+    future(now(), 1000, '_tick', { type: '_tick' });
+    for (var i = 1; i <= 9; i++) future(now(), i * 100, '_subTick', { step: i });
     return null;
 });
+
+// counter increments on each main tick
+const counter = Behaviors.collect(0, Events.or(incr, decr, _tick), (prev, ev) => {
+    if (ev && ev.type === '_tick') return prev + 1;
+    return prev + ev;
+});
+
+// subCounter increments on each subtick (9x per second when running)
+const subCounter = Behaviors.collect(0, _subTick, (prev, _) => prev + 1);
+
+// ── VIEW ────────────────────────────────────────────────────────────────────
+
+const incr   = Events.listener(Renkon.app.rootEl.querySelector('#incr'),   'click', () => 1);
+const decr   = Events.listener(Renkon.app.rootEl.querySelector('#decr'),   'click', () => -1);
+const toggle = Events.listener(Renkon.app.rootEl.querySelector('#toggle'), 'click', () => 1);
+
+const _render = Behaviors.collect(null,
+    Events.or(Events.change($counter), Events.change($subCounter), Events.change($running)),
+    (_, __) => {
+        var countEl  = Renkon.app.rootEl.querySelector('#count');
+        var subEl    = Renkon.app.rootEl.querySelector('#subcounter');
+        var toggleEl = Renkon.app.rootEl.querySelector('#toggle');
+        if (countEl)  countEl.textContent  = counter;
+        if (subEl)    subEl.textContent    = 'sub: ' + subCounter;
+        if (toggleEl) toggleEl.textContent = running ? 'Stop' : 'Start';
+        return null;
+    }
+);
 `;
 
-const MODEL_NODES = ['counter', 'change', 'tick'];
+const MODEL_NODES = ['counter', 'subCounter', 'running', '_tick', '_subTick', '_tickLoop'];
 
-// ═══════════════════════════════════════════════════════════════════════════
-// COMPILE — krestianify splits the program automatically:
-//
-//   model PS gets:
-//     const incr   = Events.receiver();   ← stub, receives ws msg
-//     const decr   = Events.receiver();   ← stub, receives ws msg
-//     const change = Events.or(incr, decr);
-//     const counter = Behaviors.collect(0, change, (prev, ch) => prev + ch);
-//
-//   view PS gets:
-//     const counter = Behaviors.receiver();  ← stub, receives modelStateKeys push
-//     const incr = Events.listener(...);
-//     const decr = Events.listener(...);
-//     const _render = Behaviors.collect(...);
-//     const _kfy_send_incr = Behaviors.collect(null, incr, (_, v) => { _kfy_send("incr", v); ... });
-//     const _kfy_send_decr = Behaviors.collect(null, decr, (_, v) => { _kfy_send("decr", v); ... });
-// ═══════════════════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────────────────────────────────
+// Boot
+// ─────────────────────────────────────────────────────────────────────────
 
-const compiled = krestianify(APP, MODEL_NODES);
-
-console.group('%c[krestianify] incr/decr result', 'color:#0f9;font-weight:bold');
-console.log('modelStateKeys:', compiled.modelStateKeys);
-console.log('modelToView:',    [...compiled.modelToView]);
-console.log('viewToModel:',    [...compiled.viewToModel]);
-console.log('--- modelProgram ---\n' + compiled.modelProgram);
-console.log('--- viewProgram ---\n'  + compiled.viewProgram);
-console.groupEnd();
-
-// ═══════════════════════════════════════════════════════════════════════════
-// BOOT
-// ═══════════════════════════════════════════════════════════════════════════
-
-function parseUrlParams() {
-    const p = new URLSearchParams(window.location.search);
-    const seloId = p.get('k') || 'kfy-incr';
-    let wsUrl = 'ws://localhost:3000';
-    const r = p.get('r');
-    if (r) wsUrl = r.replace(/^https:\/\//, 'wss://').replace(/^http:\/\//, 'ws://');
-    return { seloId, wsUrl };
-}
-
-function buildDOM(rootEl, label) {
-    // Minimal DOM the Renkon program targets — user decides what this looks like
+const buildUI = (rootEl, label) => {
     rootEl.innerHTML = `
-        <span style="font-size:11px;color:#889">${label}</span>
-        <div id="renkon">
-            <div id="count">0</div>
-            <div style="display:flex;gap:12px">
-                <button id="incr">+</button>
-                <button id="decr">−</button>
-            </div>
+        <div style="font-size:11px;color:#889;letter-spacing:1px">${label}</div>
+        <div id="count" style="font-size:72px;font-weight:bold;color:#223;letter-spacing:-2px">0</div>
+        <div id="subcounter" style="font-size:13px;color:#88a;margin-top:-8px">sub: 0</div>
+        <div style="display:flex;gap:12px;margin-top:8px">
+            <button id="incr"   style="font-size:28px;width:60px;height:60px;border-radius:10px;border:2px solid #aab;background:#fff;cursor:pointer">+</button>
+            <button id="decr"   style="font-size:28px;width:60px;height:60px;border-radius:10px;border:2px solid #aab;background:#fff;cursor:pointer">−</button>
+            <button id="toggle" style="font-size:16px;width:80px;height:60px;border-radius:10px;border:2px solid #88b;background:#eef;cursor:pointer">Start</button>
         </div>
+        <div style="font-size:11px;color:#aab">+1/s · 9 subticks/s · press Start</div>
     `;
-}
+};
 
-function bootVM(rootEl, label, seloId, wsUrl, delay) {
-    buildDOM(rootEl, label);
-    setTimeout(() => {
-        const vm = new KrestianstvoVM({ seloId, wsUrl });
-        vm.modelStateKeys  = compiled.modelStateKeys;
-        vm.viewEchoExclude = compiled.viewToModel;  // don't echo incr/decr back to viewPS
-        vm.viewAppExtra    = { rootEl };
-        vm.start({
-            modelProgram: compiled.modelProgram,
-            viewProgram:  compiled.viewProgram,
-            applyAction:  compiled.applyAction,  // timer rescheduling via future(state.time,...)
-        });
-        registerVM(vm);
-    }, delay);
-}
-
-const { seloId, wsUrl } = parseUrlParams();
-bootVM(document.getElementById('vmA-root'), 'peer A', seloId, wsUrl, 0);
-bootVM(document.getElementById('vmB-root'), 'peer B', seloId, wsUrl, 350);
-
+selo({ app: APP, modelNodes: MODEL_NODES, seloId: 'kfy-timer', reflector: 'ws://localhost:3000',
+           rootEl: document.getElementById('vmA-root'), label: 'peer A', delay: 0,   buildUI });
+selo({ app: APP, modelNodes: MODEL_NODES, seloId: 'kfy-timer', reflector: 'ws://localhost:3000',
+           rootEl: document.getElementById('vmB-root'), label: 'peer B', delay: 350, buildUI });
 </script>
 </body>
 </html>

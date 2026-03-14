@@ -34,8 +34,6 @@
 </style>
 <!-- krestianstvo-ui.js must load BEFORE the ES module -->
 <script src="./krestianstvo-ui.js"></script>
-<!-- krestianify.js: depends only on ProgramState (from renkon-core via krestianstvo-vm.js) -->
-<script src="../krestianify.js"></script>
 </head>
 <body>
 <div id="stage">
@@ -52,8 +50,9 @@
   </div>
 </div>
 <script type="module">
-import { KrestianstvoVM } from '../krestianstvo-vm.js';
-import { registerVM } from './vm-lifecycle.js';
+import { KrestianstvoVM, krestianify,
+         registerVM, parseUrlParams } from '../index.js';
+
 import { installDOMHandlers } from './dom-demo.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -107,18 +106,6 @@ import { APPLY_ACTION, VIEW_PROGRAM } from './dom-demo.js';
 // COMPILE
 // ═══════════════════════════════════════════════════════════════════════════
 
-// KrestianstvoVM must be in scope so krestianify.js's krestianifyBoot can use it.
-// We attach it to window here.
-window.KrestianstvoVM = KrestianstvoVM;
-
-// ProgramState is needed by krestianify.js for static analysis.
-// It is imported by krestianstvo-vm.js and exposed on the module; we expose
-// it on window so krestianify.js (a plain script) can access it.
-// krestianstvo-vm.js re-exports ProgramState via the module, but since
-// krestianify is a plain script it reads window.ProgramState.
-// We import ProgramState directly from renkon-core here:
-import { ProgramState } from 'https://cdn.jsdelivr.net/npm/renkon-core/dist/renkon-core.js';
-window.ProgramState = ProgramState;
 
 const compiled = krestianify(UNIFIED_APP, MODEL_NODES);
 
@@ -137,14 +124,6 @@ const finalViewProgram = compiled.viewProgram + '\n' + VIEW_PROGRAM;
 // BOOT
 // ═══════════════════════════════════════════════════════════════════════════
 
-function parseUrlParams() {
-    const p = new URLSearchParams(window.location.search);
-    const seloId = p.get('k') || 'kfy-demo';
-    let wsUrl = 'ws://localhost:3000';
-    const r = p.get('r');
-    if (r) wsUrl = r.replace(/^https:\/\//, 'wss://').replace(/^http:\/\//, 'ws://');
-    return { seloId, wsUrl };
-}
 
 function bootVM(rootEl, seloId, wsUrl, delay) {
     setTimeout(() => {
@@ -160,9 +139,11 @@ function bootVM(rootEl, seloId, wsUrl, delay) {
     }, delay);
 }
 
-const { seloId, wsUrl } = parseUrlParams();
+(async () => {
+const { seloId, wsUrl } = parseUrlParams('kfy-demo', 'ws://localhost:3000');
 bootVM(document.getElementById('vmA-root'), seloId, wsUrl, 0);
 bootVM(document.getElementById('vmB-root'), seloId, wsUrl, 350);
+})();
 
 
 </script>
