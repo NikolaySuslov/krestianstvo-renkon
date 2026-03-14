@@ -21,6 +21,18 @@ Introducing the Croquet-TeaTime-inspired, Renkon-driven collaborative computatio
 
 ![](public/doc/vm.gif)
 
+### ES6 Module
+
+No build step. No `npm install`. Works in any modern browser.
+
+```html
+<script type="module">
+import { selo, krestianify, KrestianstvoVM,
+         registerVM, parseUrlParams }
+    from 'https://esm.sh/krestianstvo-renkon@0.1.0/public/index.js';
+</script>
+```
+
 ## To run localy
 
 ``` 
