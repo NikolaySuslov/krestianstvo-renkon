@@ -40,9 +40,8 @@ npm install
 npm start
 ```
 
-Open web browser:   
-http://localhost:3000 - for running tests.    
-http://localhost:3000/demo.html - for demo app.  
+Open web browser:  
+http://localhost:3000 - list demo apps.  
 
 URL params for demo page:   
 - ?k=seloName — selo id  
