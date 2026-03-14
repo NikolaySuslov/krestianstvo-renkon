@@ -33,7 +33,7 @@ import { selo, krestianify, KrestianstvoVM,
 </script>
 ```
 
-## To run localy
+## To run reflector localy or develop
 
 ``` 
 npm install
