@@ -45,7 +45,7 @@ Import Krestianstvo VM as ES6 Module. No build step. No `npm install`.
 <div id="root"></div>
 
 <script type="module">
-import { selo } from 'https://cdn.jsdelivr.net/npm/krestianstvo-renkon@0.1.0/public/index.js';
+import { selo } from 'https://cdn.jsdelivr.net/npm/krestianstvo-renkon@0.1.1/public/index.js';
 
 const APP = `
 // ── MODEL ───

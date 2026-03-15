@@ -6,7 +6,7 @@
 <script type="module">
 import { selo, krestianify, KrestianstvoVM,
          registerVM, parseUrlParams }
-    from 'https://cdn.jsdelivr.net/npm/krestianstvo-renkon@0.1.0/public/index.js';
+    from 'https://cdn.jsdelivr.net/npm/krestianstvo-renkon@0.1.1/public/index.js';
 </script>
 ```
 
@@ -23,7 +23,7 @@ No build step. No `npm install`. Works in any modern browser.
 <div id="root"></div>
 
 <script type="module">
-import { selo } from 'https://cdn.jsdelivr.net/npm/krestianstvo-renkon@0.1.0/public/index.js';
+import { selo } from 'https://cdn.jsdelivr.net/npm/krestianstvo-renkon@0.1.1/public/index.js';
 
 const APP = `
 // ── MODEL ────────────────────────────────────────────────────────────────
@@ -251,7 +251,7 @@ For full control, use `KrestianstvoVM` directly and supply separate model/view p
 
 ```js
 import { KrestianstvoVM, registerVM, parseUrlParams }
-    from 'https://cdn.jsdelivr.net/npm/krestianstvo-renkon@0.1.0/public/index.js';
+    from 'https://cdn.jsdelivr.net/npm/krestianstvo-renkon@0.1.1/public/index.js';
 
 const { seloId, reflector } = parseUrlParams('my-app', 'ws://localhost:3000');
 
