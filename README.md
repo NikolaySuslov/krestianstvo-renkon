@@ -13,6 +13,7 @@ Introducing the Croquet-TeaTime-inspired, Renkon-driven collaborative computatio
 * No dependencies - works directly in browser or NodeJS
 * Snapshot/Restoring logic - late joiners get full state + history replay
 * **Krestianify compiller** converts a unified Renkon app (single source string) into the model/view split that KrestianstvoVM.start() expects.
+* Distributing as an ES6 module
 
 ### Source files
 * [krestianstvo-vm.js](public/krestianstvo-vm.js)
@@ -27,13 +28,24 @@ No build step. No `npm install`. Works in any modern browser.
 
 ```html
 <script type="module">
-import { selo, krestianify, KrestianstvoVM,
-         registerVM, parseUrlParams }
-    from 'https://esm.sh/krestianstvo-renkon@0.1.0/public/index.js';
+import { selo, krestianify, KrestianstvoVM}
+    from 'https://cdn.jsdelivr.net/npm/krestianstvo-renkon@0.1.0/public/index.js';
+
+selo({
+    app:        APP,
+    modelNodes: ['counter'],
+    seloId:     'my-app',
+    reflector:  'ws://localhost:3000',
+    rootEl:     document.getElementById('root'),
+    buildUI,
+});
+
 </script>
+
 ```
 
-## To run reflector localy or develop
+
+### To run reflector localy
 
 ``` 
 npm install
@@ -79,6 +91,7 @@ Additional documentation
 
 - [Krestianify](/public/doc/krestianify.md)
 - [Demos explained](/public/doc/demos.md)
+- [Using as ES6 module](/public/doc/demos.md)
 ---
 
 ## Core Concepts
