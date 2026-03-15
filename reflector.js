@@ -61,7 +61,7 @@ function createSelo(seloId) {
         );
 
         // vTime: wall-clock ms since selo start — same for HB and CM stamps.
-        const vTime = Behaviors.collect(0, Events.change($hbOrClMsg), (_, c) => c.vTime);
+        const vTime = Behaviors.collect(0, hbOrClMsg, (_, c) => c.vTime);
 
         // ── Network messages (connect / disconnect / snapshot) ───────────────
         // These are lower-frequency management events — generator stream is fine.
@@ -208,7 +208,7 @@ function createSelo(seloId) {
         // → joiner got first (stale counter), leader advanced by second → off-by-one.
         const joinWatcher = Behaviors.collect(
             { prevList: [] },
-            Events.change($clientList),
+            clientList,
             (state, newList) => ({ prevList: newList })
         );
 
@@ -319,7 +319,6 @@ export function attachReflector(wss) {
 wss.on('connection', (ws, req) => {
     const clientId = `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     let currentSeloId = null;
-    
     console.log(`Client ${clientId} connected (not yet in a selo)`);
     clients.set(clientId, { ws, seloId: null, clientId });
 

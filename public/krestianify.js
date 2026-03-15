@@ -232,9 +232,10 @@ function krestianify(userCode, modelNodes) {
 
     var viewSenderLines = [];
     viewToModel.forEach(function(name) {
-        // Trigger on Events.change for Behaviors, directly for Events
-        var t = types.get(name) || 'Behavior';
-        var trigger = (t === 'Event') ? name : 'Events.change($' + name + ')';
+        // Both Events and Behaviors can be used directly as triggers —
+        // Events.change($x) is only needed for self-referential cycles which
+        // never occur in viewToModel sender nodes.
+        var trigger = name;
         // _kfy_send is provided by VIEW_PREAMBLE in krestianstvo-vm.js.
         viewSenderLines.push(
             'const _kfy_send_' + name + ' = Behaviors.collect(null, ' + trigger + ', function(_, v) {\n' +

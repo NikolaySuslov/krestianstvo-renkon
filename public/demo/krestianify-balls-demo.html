@@ -111,7 +111,7 @@ const click = Events.or(_touchTap, _mouseClick);
 const _frame = Events.timer(16);
 
 // Draw — view just reads ball.fade directly from model
-const _render = Behaviors.collect(null, Events.or(Events.change($balls), _frame), (_, __) => {
+const _render = Behaviors.collect(null, Events.or(balls, _frame), (_, __) => {
     var canvas = Renkon.app.rootEl.querySelector('.k-canvas');
     if (!canvas) return null;
     var bs  = balls || [];
