@@ -4,7 +4,7 @@ Introducing the Croquet-TeaTime-inspired, Renkon-driven collaborative computatio
 
 #### Live demo (https://renkon.krestianstvo.org)
 
-![](/public/doc/vm.jpg)
+![](/doc/vm.jpg)
 
 
 * Overall all parts of the classic **Croquet VM** are implemented, including **Reflector server**, **Virtual Time**, **Recursive Future Messages**, **Portals** etc. all in Renkon FRP architecture.
@@ -20,7 +20,7 @@ Introducing the Croquet-TeaTime-inspired, Renkon-driven collaborative computatio
 * [krestianify.js](public/krestianify.js)
 * [reflector.js](reflector.js)
 
-![](public/doc/vm.gif)
+![](/doc/vm.gif)
 
 ### ES6 Module
 
