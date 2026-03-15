@@ -56,7 +56,8 @@ const counter = Behaviors.collect(0, click,
 const click = Events.listener(Renkon.app.rootEl.querySelector('#btn'),
                 'click', () => 1);
 
-const _render = Behaviors.collect(null, counter, (_, n) => {
+const _render = Behaviors.collect(null, 
+    Events.change(counter), (_, n) => {
     Renkon.app.rootEl.querySelector('#count').textContent = n;
     return null;
 });

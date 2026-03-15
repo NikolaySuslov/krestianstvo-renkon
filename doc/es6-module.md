@@ -32,7 +32,7 @@ const counter = Behaviors.collect(0, click, (prev, _) => prev + 1);
 // ── VIEW ─────────────────────────────────────────────────────────────────
 const click = Events.listener(Renkon.app.rootEl.querySelector('#btn'), 'click', () => 1);
 
-const _render = Behaviors.collect(null, counter, (_, n) => {
+const _render = Behaviors.collect(null, Events.change(counter), (_, n) => {
     Renkon.app.rootEl.querySelector('#count').textContent = n;
     return null;
 });
@@ -105,24 +105,7 @@ selo({ app: APP, modelNodes: ['counter'],
 
 These functions are available inside any model combinator (`Behaviors.collect` accumulator) and inside `applyAction`. They are deterministic — identical on all peers.
 
-### When to use `Events.change($x)`
-
-In Renkon, `Events.change($x)` is only needed when a `Behaviors.collect` node references **itself** as a trigger — i.e. a self-referential cycle. The `$` prefix tells Renkon to use the node's previous settled value as the trigger, breaking the cycle.
-
-```js
-// Self-referential — needs $worldState to break the cycle
-const worldState = Behaviors.collect({}, Events.change($worldState), (s, ev) => ...);
-
-// No cycle — plain name is correct
-const _render = Behaviors.collect(null, counter, (_, n) => ...);
-```
-
-In krestianify apps, view nodes reading model receivers are never self-referential — always use the plain name.
-
----
-
 ### `now()`
-
 
 Returns virtual time in milliseconds since the session started. Identical on all peers at the same logical moment.
 
@@ -199,18 +182,18 @@ These nodes are always available in view programs without declaring them. They a
 ```js
 // ── VIEW ─────────────────────────────────────────────────────────────────
 
-const _renderPeers = Behaviors.collect(null, clients, (_, ids) => {
+const _renderPeers = Behaviors.collect(null, Events.change($clients), (_, ids) => {
     console.log(ids.length + ' peers online');
     console.log('I am:', clientIdentity.clientId);
     return null;
 });
 
-const _onJoin = Behaviors.collect(null, clientJoined, (_, ids) => {
+const _onJoin = Behaviors.collect(null, Events.change($clientJoined), (_, ids) => {
     ids.forEach(id => console.log('joined:', id));
     return null;
 });
 
-const _onExit = Behaviors.collect(null, clientLeft, (_, ids) => {
+const _onExit = Behaviors.collect(null, Events.change($clientLeft), (_, ids) => {
     ids.forEach(id => console.log('left:', id));
     return null;
 });
@@ -225,7 +208,7 @@ const _onExit = Behaviors.collect(null, clientLeft, (_, ids) => {
 ```js
 // ── MODEL ─────────────────────────────────────────────────────────────────
 
-const _welcome = Behaviors.collect(null, clientJoined, (_, ids) => {
+const _welcome = Behaviors.collect(null, Events.change($clientJoined), (_, ids) => {
     ids.forEach(id => future(now(), 0, 'welcome', { id: id }));
     return null;
 });

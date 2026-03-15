@@ -90,7 +90,7 @@ const decr   = Events.listener(Renkon.app.rootEl.querySelector('#decr'),   'clic
 const toggle = Events.listener(Renkon.app.rootEl.querySelector('#toggle'), 'click', () => 1);
 
 const _render = Behaviors.collect(null,
-    Events.or(counter, subCounter,running),
+    Events.or(Events.change(counter), Events.change(subCounter), Events.change(running)),
     (_, __) => {
         var countEl  = Renkon.app.rootEl.querySelector('#count');
         var subEl    = Renkon.app.rootEl.querySelector('#subcounter');
