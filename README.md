@@ -59,14 +59,6 @@ URL params for demo page:
 - ?k=seloName — selo id  
 - ?r=http://host:port  — reflector base url
 
-
-### Learn more about:  
-
-* [**Krestianstvo SDK 4**](https://github.com/NikolaySuslov/krestianstvo-playground) - [https://play.krestianstvo.org](https://play.krestianstvo.org)
-* [**Croquet VM**](https://github.com/croquet/croquet) 
-* [**Renkon**](https://github.com/yoshikiohshima/renkon)
-
-
 # Documentation
 
 ## Table of Contents
@@ -89,9 +81,15 @@ URL params for demo page:
 
 Additional documentation
 
-- [Krestianify](/public/doc/krestianify.md)
-- [Demos explained](/public/doc/demos.md)
-- [Using as ES6 module](/public/doc/demos.md)
+- [Krestianify](/doc/krestianify.md)
+- [Demos explained](/doc/demos.md)
+- [Using as ES6 module](/doc/demos.md)
+
+Learn more about
+
+- [Krestianstvo SDK 4](https://github.com/NikolaySuslov/krestianstvo-playground) - [https://play.krestianstvo.org](https://play.krestianstvo.org)
+- [Croquet VM](https://github.com/croquet/croquet) 
+- [Renkon](https://github.com/yoshikiohshima/renkon)
 ---
 
 ## Core Concepts
