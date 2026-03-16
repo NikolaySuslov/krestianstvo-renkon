@@ -234,7 +234,7 @@ function krestianify(userCode, modelNodes) {
     viewToModel.forEach(function(name) {
         // Trigger on Events.change for Behaviors, directly for Events
         var t = types.get(name) || 'Behavior';
-        var trigger = (t === 'Event') ? name : 'Events.change($' + name + ')';
+        var trigger = (t === 'Event') ? name : 'Events.change(' + name + ')';
         // _kfy_send is provided by VIEW_PREAMBLE in krestianstvo-vm.js.
         viewSenderLines.push(
             'const _kfy_send_' + name + ' = Behaviors.collect(null, ' + trigger + ', function(_, v) {\n' +
@@ -272,7 +272,7 @@ function krestianify(userCode, modelNodes) {
         // Guard: checks queue so joiners don't double-seed.
         modelTimerLines.push(
             '// kfy: Events.timer(' + interval + ') → future() self-chain\n' +
-            'const _kfy_timerseed_' + d.name + ' = Behaviors.collect(false, Events.change($worldState), function(started, ws) {\n' +
+            'const _kfy_timerseed_' + d.name + ' = Behaviors.collect(false, Events.change(worldState), function(started, ws) {\n' +
             '    if (started || !ws) return started;\n' +
             '    var queued = (ws.queue || []).some(function(q) { return q.type === ' + dn + '; });\n' +
             '    if (!queued) future(now(), ' + interval + ', ' + dn + ', 1);\n' +

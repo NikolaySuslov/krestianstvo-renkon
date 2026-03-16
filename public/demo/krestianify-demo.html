@@ -65,17 +65,17 @@ const UNIFIED_APP = `
 // ── MODEL nodes: shared, deterministic, replicated ────────────────────────
 const ticking = Behaviors.collect(
     (_initialState && _initialState.ticking) || false,
-    Events.change($worldState),
+    Events.change(worldState),
     (_, s) => s ? s.ticking : false
 );
 const windows = Behaviors.collect(
     (_initialState && _initialState.windows) || {},
-    Events.change($worldState),
+    Events.change(worldState),
     (_, s) => s ? s.windows : {}
 );
 const randomResult = Behaviors.collect(
     (_initialState && _initialState.randomResult) || null,
-    Events.change($worldState),
+    Events.change(worldState),
     (_, s) => s ? s.randomResult : null
 );
 const tick       = Events.receiver();

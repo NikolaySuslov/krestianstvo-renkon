@@ -64,9 +64,9 @@ export const APPLY_ACTION = `
 // Renkon nodes inside model PS. _initialState provided by model preamble.
 export const MODEL_PROGRAM = `
 // App-level worldState projections — seeded from _initialState so snapshot restore reads correctly
-const ticking      = Behaviors.collect((_initialState && _initialState.ticking)      || false, Events.change($worldState), (_, s) => s ? s.ticking      : false);
-const windows      = Behaviors.collect((_initialState && _initialState.windows)      || {},    Events.change($worldState), (_, s) => s ? s.windows      : {});
-const randomResult = Behaviors.collect((_initialState && _initialState.randomResult) || null,  Events.change($worldState), (_, s) => s ? s.randomResult : null);
+const ticking      = Behaviors.collect((_initialState && _initialState.ticking)      || false, Events.change(worldState), (_, s) => s ? s.ticking      : false);
+const windows      = Behaviors.collect((_initialState && _initialState.windows)      || {},    Events.change(worldState), (_, s) => s ? s.windows      : {});
+const randomResult = Behaviors.collect((_initialState && _initialState.randomResult) || null,  Events.change(worldState), (_, s) => s ? s.randomResult : null);
 
 const tick       = Events.receiver();
 const subTick    = Events.receiver();
@@ -207,7 +207,7 @@ const renderer = Behaviors.collect(null, renderTick, function(_, __) {
     return null;
 });
 
-const _winSync = Behaviors.collect(null, Events.change($windows), function(_, wins) {
+const _winSync = Behaviors.collect(null, Events.change(windows), function(_, wins) {
     if (!wins) return null;
     var app = Renkon.app;
     app.windowPositions = wins;

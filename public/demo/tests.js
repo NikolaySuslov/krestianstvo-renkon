@@ -55,8 +55,8 @@ const APPLY_ACTION = `
 
 const MODEL_PROGRAM = `
 // App-level worldState projections — seeded from _initialState so snapshot restore reads correctly
-const ticking      = Behaviors.collect((_initialState && _initialState.ticking)      || false, Events.change($worldState), (_, s) => s ? s.ticking      : false);
-const randomResult = Behaviors.collect((_initialState && _initialState.randomResult) || null,  Events.change($worldState), (_, s) => s ? s.randomResult : null);
+const ticking      = Behaviors.collect((_initialState && _initialState.ticking)      || false, Events.change(worldState), (_, s) => s ? s.ticking      : false);
+const randomResult = Behaviors.collect((_initialState && _initialState.randomResult) || null,  Events.change(worldState), (_, s) => s ? s.randomResult : null);
 
 // tick: fires every 1000ms virtual (recursive future)
 const tick    = Events.receiver();
@@ -90,26 +90,26 @@ const counter      = Behaviors.collect(0,     Events.receiver(), function(_,v){r
 const subCounter   = Behaviors.collect(0,     Events.receiver(), function(_,v){return v||0;});
 
 // [TEST future] — counter + subCounter pushed via modelStateKeys
-const _logCounter = Behaviors.collect(null, Events.change($counter), (_, n) => {
+const _logCounter = Behaviors.collect(null, Events.change(counter), (_, n) => {
     console.log('%c[TEST counter] counter=' + n, 'color:#0f8;font-weight:bold');
     return null;
 });
 
-const _logSubCounter = Behaviors.collect(null, Events.change($subCounter), (_, n) => {
+const _logSubCounter = Behaviors.collect(null, Events.change(subCounter), (_, n) => {
     console.log('%c[TEST subCounter] subCounter=' + n + ' (should be counter×9)',
         'color:#0a6;font-weight:bold');
     return null;
 });
 
 // [TEST peers]
-const _logPeers = Behaviors.collect(null, Events.change($objects), (_, o) => {
+const _logPeers = Behaviors.collect(null, Events.change(objects), (_, o) => {
     console.log('%c[TEST peers] ' + Object.keys(o ?? {}).length + ' peer(s)',
         'color:#0cf;font-weight:bold');
     return null;
 });
 
 // [TEST vTime]
-const _logTime = Behaviors.collect(0, Events.change($vTime), (prev, t) => {
+const _logTime = Behaviors.collect(0, Events.change(vTime), (prev, t) => {
     if (t - prev >= 950)
         console.log('%c[TEST vTime] t=' + t, 'color:#888');
     return (t - prev >= 950) ? t : prev;

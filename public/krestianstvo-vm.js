@@ -274,23 +274,23 @@ const worldState = Behaviors.collect(
 
     const vTimeSrc = _src(function() {
 // Core projections — seeded from _initialState so snapshot restore reads correctly
-const vTime   = Behaviors.collect((_initialState && _initialState.time)    || 0,  Events.change($worldState), (_, s) => s ? s.time    : 0);
-const objects = Behaviors.collect((_initialState && _initialState.objects) || {}, Events.change($worldState), (_, s) => s ? s.objects : {});
+const vTime   = Behaviors.collect((_initialState && _initialState.time)    || 0,  Events.change(worldState), (_, s) => s ? s.time    : 0);
+const objects = Behaviors.collect((_initialState && _initialState.objects) || {}, Events.change(worldState), (_, s) => s ? s.objects : {});
 // clients — sorted array of clientIds currently in the selo, derived from objects
-const clients = Behaviors.collect([], Events.change($objects), (_, objs) => objs ? Object.keys(objs).sort() : []);
+const clients = Behaviors.collect([], Events.change(objects), (_, objs) => objs ? Object.keys(objs).sort() : []);
 // clientJoined — array of clientIds that just joined (fires on each objects change)
 // clientLeft   — array of clientIds that just left
 const _clientDiff = Behaviors.collect(
     { prev: [], joined: [], left: [] },
-    Events.change($clients),
+    Events.change(clients),
     (state, curr) => {
         var joined = curr.filter(function(id) { return state.prev.indexOf(id) === -1; });
         var left   = state.prev.filter(function(id) { return curr.indexOf(id) === -1; });
         return { prev: curr, joined: joined, left: left };
     }
 );
-const clientJoined = Behaviors.collect([], Events.change($_clientDiff), (_, d) => d.joined);
-const clientLeft   = Behaviors.collect([], Events.change($_clientDiff), (_, d) => d.left);
+const clientJoined = Behaviors.collect([], Events.change(_clientDiff), (_, d) => d.joined);
+const clientLeft   = Behaviors.collect([], Events.change(_clientDiff), (_, d) => d.left);
     });
 
 
@@ -345,7 +345,7 @@ const clients        = Behaviors.collect([], Events.receiver(), function(_,v){re
 // clientJoined / clientLeft — arrays of ids that joined/left since last objects change
 const clientJoined   = Behaviors.collect([], Events.receiver(), function(_,v){return v || [];});
 const clientLeft     = Behaviors.collect([], Events.receiver(), function(_,v){return v || [];});
-const myObject = Behaviors.collect(null, Events.change($objects), function(_, objs) {
+const myObject = Behaviors.collect(null, Events.change(objects), function(_, objs) {
     const id = clientIdentity && clientIdentity.clientId;
     return id ? ((objs && objs[id]) || null) : null;
 });
@@ -485,7 +485,7 @@ const wsMsg = Behaviors.collect(null, wsMessages, function(_, res) {
 // no sandbox globals (no Date, Math, queueMicrotask) inside this string.
 const seloState = Behaviors.collect(
     { phase: null, clientId: null, buffer: [] },
-    Events.change($wsMsg),
+    Events.change(wsMsg),
     function(state, msg) {
         if (!msg) return state;
         var vm = Renkon.app.vm;
@@ -515,7 +515,7 @@ const spawnedNames = Behaviors.collect(
 // children$ — reactive Map<name, KrestianstvoVM> managed by _diffChildren
 const children$ = Behaviors.collect(
     new Map(),
-    Events.change($spawnedNames),
+    Events.change(spawnedNames),
     function(prev, names) { return Renkon.app.vm._diffChildren(prev, names); }
 );
         }) + '\n';
@@ -792,7 +792,7 @@ const children$ = Behaviors.collect(
             }
             // Keep app._vTime current so now() works in model accumulator bodies
             psRef._vTime = t;
-            //console.log('[_makeSend] ev.type=' + ev.type + ' envelope t=' + t);
+            console.log('[_makeSend] ev.type=' + ev.type + ' envelope t=' + t);
             psRef._ps.registerEvent('_raw', ev);
             // evaluate x2: (1) enqueue into worldState, (2) drain worldState
             // drain also registerEvent(msg.type) for non-viewToModel types (tick, subTick etc.)

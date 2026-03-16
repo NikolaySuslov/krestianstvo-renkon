@@ -6,7 +6,7 @@
 <script type="module">
 import { selo, krestianify, KrestianstvoVM,
          registerVM, parseUrlParams }
-    from 'https://cdn.jsdelivr.net/npm/krestianstvo-renkon@0.1.1/public/index.js';
+    from 'https://cdn.jsdelivr.net/npm/krestianstvo-renkon@latest/public/index.js';
 </script>
 ```
 
@@ -23,19 +23,18 @@ No build step. No `npm install`. Works in any modern browser.
 <div id="root"></div>
 
 <script type="module">
-import { selo } from 'https://cdn.jsdelivr.net/npm/krestianstvo-renkon@0.1.1/public/index.js';
+import { selo } from 'https://cdn.jsdelivr.net/npm/krestianstvo-renkon@latest/public/index.js';
 
 const APP = `
-// ── MODEL ────────────────────────────────────────────────────────────────
+// ── MODEL ──
 const counter = Behaviors.collect(0, click, (prev, _) => prev + 1);
 
-// ── VIEW ─────────────────────────────────────────────────────────────────
+// ── VIEW ───
 const click = Events.listener(Renkon.app.rootEl.querySelector('#btn'), 'click', () => 1);
 
-const _render = Behaviors.collect(null, Events.change(counter), (_, n) => {
-    Renkon.app.rootEl.querySelector('#count').textContent = n;
-    return null;
-});
+const _render = (()=>{
+  Renkon.app.rootEl.querySelector('#count').textContent = counter;
+})();
 `;
 
 const buildUI = (rootEl, label) => {
@@ -182,18 +181,18 @@ These nodes are always available in view programs without declaring them. They a
 ```js
 // ── VIEW ─────────────────────────────────────────────────────────────────
 
-const _renderPeers = Behaviors.collect(null, Events.change($clients), (_, ids) => {
+const _renderPeers = Behaviors.collect(null, Events.change(clients), (_, ids) => {
     console.log(ids.length + ' peers online');
     console.log('I am:', clientIdentity.clientId);
     return null;
 });
 
-const _onJoin = Behaviors.collect(null, Events.change($clientJoined), (_, ids) => {
+const _onJoin = Behaviors.collect(null, Events.change(clientJoined), (_, ids) => {
     ids.forEach(id => console.log('joined:', id));
     return null;
 });
 
-const _onExit = Behaviors.collect(null, Events.change($clientLeft), (_, ids) => {
+const _onExit = Behaviors.collect(null, Events.change(clientLeft), (_, ids) => {
     ids.forEach(id => console.log('left:', id));
     return null;
 });
@@ -208,7 +207,7 @@ const _onExit = Behaviors.collect(null, Events.change($clientLeft), (_, ids) => 
 ```js
 // ── MODEL ─────────────────────────────────────────────────────────────────
 
-const _welcome = Behaviors.collect(null, Events.change($clientJoined), (_, ids) => {
+const _welcome = Behaviors.collect(null, Events.change(clientJoined), (_, ids) => {
     ids.forEach(id => future(now(), 0, 'welcome', { id: id }));
     return null;
 });
@@ -251,7 +250,7 @@ For full control, use `KrestianstvoVM` directly and supply separate model/view p
 
 ```js
 import { KrestianstvoVM, registerVM, parseUrlParams }
-    from 'https://cdn.jsdelivr.net/npm/krestianstvo-renkon@0.1.1/public/index.js';
+    from 'https://cdn.jsdelivr.net/npm/krestianstvo-renkon@latest/public/index.js';
 
 const { seloId, reflector } = parseUrlParams('my-app', 'ws://localhost:3000');
 

@@ -45,22 +45,18 @@ Import Krestianstvo VM as ES6 Module. No build step. No `npm install`.
 <div id="root"></div>
 
 <script type="module">
-import { selo } from 'https://cdn.jsdelivr.net/npm/krestianstvo-renkon@0.1.1/public/index.js';
+import { selo } from 'https://cdn.jsdelivr.net/npm/krestianstvo-renkon@latest/public/index.js';
 
 const APP = `
-// ── MODEL ───
-const counter = Behaviors.collect(0, click, 
-                (prev, _) => prev + 1);
+// ── MODEL ──
+const counter = Behaviors.collect(0, click, (prev, _) => prev + 1);
 
-// ── VIEW ---
-const click = Events.listener(Renkon.app.rootEl.querySelector('#btn'),
-                'click', () => 1);
+// ── VIEW ───
+const click = Events.listener(Renkon.app.rootEl.querySelector('#btn'), 'click', () => 1);
 
-const _render = Behaviors.collect(null, 
-    Events.change(counter), (_, n) => {
-    Renkon.app.rootEl.querySelector('#count').textContent = n;
-    return null;
-});
+const _render = (()=>{
+  Renkon.app.rootEl.querySelector('#count').textContent = counter;
+})();
 `;
 
 const buildUI = (rootEl, label) => {
@@ -75,7 +71,7 @@ selo({
     app:        APP,
     modelNodes: ['counter'],
     seloId:     'my-app',
-    reflector:  'https://renkon.krestianstvo.org',
+    reflector:  'ws://localhost:3000',
     rootEl:     document.getElementById('root'),
     buildUI,
 });

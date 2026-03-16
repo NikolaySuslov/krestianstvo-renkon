@@ -61,7 +61,7 @@ function createSelo(seloId) {
         );
 
         // vTime: wall-clock ms since selo start — same for HB and CM stamps.
-        const vTime = Behaviors.collect(0, Events.change(hbOrClMsg), (_, c) => c.vTime);
+        const vTime = Behaviors.collect(0, hbOrClMsg, (_, c) => c.vTime);
 
         // ── Network messages (connect / disconnect / snapshot) ───────────────
         // These are lower-frequency management events — generator stream is fine.

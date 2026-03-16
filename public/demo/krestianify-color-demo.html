@@ -106,12 +106,12 @@ const color = Behaviors.collect("#cccccc", click, (_, __) => {
            (40 + Math.floor(b * 20)) + "%)";
 });
 
-const _renderCounter = Behaviors.collect(null, counter, (_, n) => {
+const _renderCounter = Behaviors.collect(null, Events.change(counter), (_, n) => {
     Renkon.app.rootEl.querySelector(".k-counter").textContent = n;
     return null;
 });
 
-const _renderColor = Behaviors.collect(null, color, (_, c) => {
+const _renderColor = Behaviors.collect(null, Events.change(color), (_, c) => {
     Renkon.app.rootEl.querySelector(".k-colorbox").style.background = c;
     return null;
 });
