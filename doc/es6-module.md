@@ -30,10 +30,10 @@ const APP = `
 const counter = Behaviors.collect(0, click, (prev, _) => prev + 1);
 
 // ── VIEW ───
-const click = Events.listener(Renkon.app.rootEl.querySelector('#btn'), 'click', () => 1);
+const click = Events.listener(rootEl.querySelector('#btn'), 'click', () => 1);
 
 const _render = (()=>{
-  Renkon.app.rootEl.querySelector('#count').textContent = counter;
+  rootEl.querySelector('#count').textContent = counter;
 })();
 `;
 

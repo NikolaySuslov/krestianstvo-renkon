@@ -85,16 +85,16 @@ const subCounter = Behaviors.collect(0, _subTick, (prev, _) => prev + 1);
 
 // ── VIEW ────────────────────────────────────────────────────────────────────
 
-const incr   = Events.listener(Renkon.app.rootEl.querySelector('#incr'),   'click', () => 1);
-const decr   = Events.listener(Renkon.app.rootEl.querySelector('#decr'),   'click', () => -1);
-const toggle = Events.listener(Renkon.app.rootEl.querySelector('#toggle'), 'click', () => 1);
+const incr   = Events.listener(rootEl.querySelector('#incr'),   'click', () => 1);
+const decr   = Events.listener(rootEl.querySelector('#decr'),   'click', () => -1);
+const toggle = Events.listener(rootEl.querySelector('#toggle'), 'click', () => 1);
 
 const _render = Behaviors.collect(null,
     Events.or(Events.change(counter), Events.change(subCounter), Events.change(running)),
     (_, __) => {
-        var countEl  = Renkon.app.rootEl.querySelector('#count');
-        var subEl    = Renkon.app.rootEl.querySelector('#subcounter');
-        var toggleEl = Renkon.app.rootEl.querySelector('#toggle');
+        var countEl  = rootEl.querySelector('#count');
+        var subEl    = rootEl.querySelector('#subcounter');
+        var toggleEl = rootEl.querySelector('#toggle');
         if (countEl)  countEl.textContent  = counter;
         if (subEl)    subEl.textContent    = 'sub: ' + subCounter;
         if (toggleEl) toggleEl.textContent = running ? 'Stop' : 'Start';

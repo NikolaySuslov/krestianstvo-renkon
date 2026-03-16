@@ -336,6 +336,8 @@ const clientLeft   = Behaviors.collect([], Events.change(_clientDiff), (_, d) =>
 const _viewSrc = fn => fn.toString().replace(/^[^{]*\{/, '').replace(/\s*\}\s*$/, '');
 
 const VIEW_PREAMBLE = _viewSrc(function() {
+// rootEl — the VM's mount element, shorthand for Renkon.app.rootEl
+const rootEl = Renkon.app.rootEl;
 // Core receivers — always available, pushed by vm after every drain
 const clientIdentity = Behaviors.collect({clientId:null,seloId:null}, Events.receiver(), function(_,id){return id;});
 const objects        = Behaviors.collect({},   Events.receiver(), function(_,v){return v;});
@@ -792,7 +794,7 @@ const children$ = Behaviors.collect(
             }
             // Keep app._vTime current so now() works in model accumulator bodies
             psRef._vTime = t;
-            console.log('[_makeSend] ev.type=' + ev.type + ' envelope t=' + t);
+            //console.log('[_makeSend] ev.type=' + ev.type + ' envelope t=' + t);
             psRef._ps.registerEvent('_raw', ev);
             // evaluate x2: (1) enqueue into worldState, (2) drain worldState
             // drain also registerEvent(msg.type) for non-viewToModel types (tick, subTick etc.)

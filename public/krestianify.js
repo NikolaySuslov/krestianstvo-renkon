@@ -165,7 +165,7 @@ var _KFY_VIEW_PREAMBLE_NAMES = new Set([
     'vTime', 'objects', 'clients',                   // model→view, pushed directly by VM
     'clientJoined', 'clientLeft', '_clientDiff',     // join/exit events, model→view
     'clientIdentity', 'myObject',                    // view-only, per-client identity
-    '_kfy_send', 'Renkon',                           // view utilities
+    '_kfy_send', 'Renkon', 'rootEl',                 // view utilities
     'uid', 'random', 'now', 'future',                  // model builtins — available everywhere
 ]);
 
@@ -232,7 +232,8 @@ function krestianify(userCode, modelNodes) {
 
     var viewSenderLines = [];
     viewToModel.forEach(function(name) {
-        // Trigger on Events.change for Behaviors, directly for Events
+        // Behaviors need Events.change() to convert to event stream;
+        // Events can be used directly as triggers.
         var t = types.get(name) || 'Behavior';
         var trigger = (t === 'Event') ? name : 'Events.change(' + name + ')';
         // _kfy_send is provided by VIEW_PREAMBLE in krestianstvo-vm.js.

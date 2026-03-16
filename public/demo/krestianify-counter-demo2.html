@@ -62,11 +62,11 @@ const tick    = Events.timer(1000);
 const change  = Events.or(incr, decr, tick);
 const counter = Behaviors.collect(0, change, (prev, ch) => prev + ch);
 
-const incr = Events.listener(Renkon.app.rootEl.querySelector("#incr"), "click", (evt) => 1);
-const decr = Events.listener(Renkon.app.rootEl.querySelector("#decr"), "click", (evt) => -1);
+const incr = Events.listener(rootEl.querySelector("#incr"), "click", (evt) => 1);
+const decr = Events.listener(rootEl.querySelector("#decr"), "click", (evt) => -1);
 
 const _render = (()=>{
-  Renkon.app.rootEl.querySelector('#count').textContent = counter;
+  rootEl.querySelector('#count').textContent = counter;
 })();
 `;
 

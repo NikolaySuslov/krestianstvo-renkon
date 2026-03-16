@@ -93,7 +93,7 @@ import { selo } from '../index.js';
 // ═══════════════════════════════════════════════════════════════════════════
 
 const APP = `
-const click   = Events.listener(Renkon.app.rootEl.querySelector(".k-colorbox"), "click", () => 1);
+const click   = Events.listener(rootEl.querySelector(".k-colorbox"), "click", () => 1);
 
 const counter = Behaviors.collect(0, click, (prev, _) => prev + 1);
 
@@ -107,12 +107,12 @@ const color = Behaviors.collect("#cccccc", click, (_, __) => {
 });
 
 const _renderCounter = Behaviors.collect(null, Events.change(counter), (_, n) => {
-    Renkon.app.rootEl.querySelector(".k-counter").textContent = n;
+    rootEl.querySelector(".k-counter").textContent = n;
     return null;
 });
 
 const _renderColor = Behaviors.collect(null, Events.change(color), (_, c) => {
-    Renkon.app.rootEl.querySelector(".k-colorbox").style.background = c;
+    rootEl.querySelector(".k-colorbox").style.background = c;
     return null;
 });
 `;

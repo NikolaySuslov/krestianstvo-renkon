@@ -93,16 +93,16 @@ const balls = Behaviors.collect([], Events.or(click, _tick), (prev, ev) => {
 
 // ── VIEW ──────────────────────────────────────────────────────────────────
 
-const _touchTap = Events.listener(Renkon.app.rootEl, 'touchstart', (e) => {
+const _touchTap = Events.listener(rootEl, 'touchstart', (e) => {
     if (e.cancelable) e.preventDefault();
-    Renkon.app.rootEl._lastTouch = Date.now();
-    var rect = Renkon.app.rootEl.getBoundingClientRect();
+    rootEl._lastTouch = Date.now();
+    var rect = rootEl.getBoundingClientRect();
     var t = e.touches[0];
     return { x: t.clientX - rect.left, y: t.clientY - rect.top };
 });
-const _mouseClick = Events.listener(Renkon.app.rootEl, 'click', (e) => {
-    if (Renkon.app.rootEl._lastTouch && Date.now() - Renkon.app.rootEl._lastTouch < 500) return null;
-    var rect = Renkon.app.rootEl.getBoundingClientRect();
+const _mouseClick = Events.listener(rootEl, 'click', (e) => {
+    if (rootEl._lastTouch && Date.now() - rootEl._lastTouch < 500) return null;
+    var rect = rootEl.getBoundingClientRect();
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
 });
 const click = Events.or(_touchTap, _mouseClick);
@@ -112,7 +112,7 @@ const _frame = Events.timer(16);
 
 // Draw — view just reads ball.fade directly from model
 const _render = Behaviors.collect(null, Events.or(Events.change(balls), _frame), (_, __) => {
-    var canvas = Renkon.app.rootEl.querySelector('.k-canvas');
+    var canvas = rootEl.querySelector('.k-canvas');
     if (!canvas) return null;
     var bs  = balls || [];
     var ctx = canvas.getContext('2d');

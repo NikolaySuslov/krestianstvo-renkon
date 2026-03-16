@@ -32,10 +32,10 @@ A Krestianify app is just a Renkon program — a string of `const` declarations 
 const APP = `
 const counter = Behaviors.collect(0, click, (prev, _) => prev + 1);
 
-const click = Events.listener(Renkon.app.rootEl.querySelector("#btn"), "click", () => 1);
+const click = Events.listener(rootEl.querySelector("#btn"), "click", () => 1);
 
 const _render = Behaviors.collect(null, counter, (_, n) => {
-    Renkon.app.rootEl.querySelector("#count").textContent = n;
+    rootEl.querySelector("#count").textContent = n;
     return null;
 });
 `;
