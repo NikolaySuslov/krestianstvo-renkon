@@ -625,11 +625,20 @@ function _clickHandler(e) {
     var rEl = Renkon.app && Renkon.app.rootEl;
     if (!rEl || !rEl.contains(e.target)) return undefined;
     var hit = e.target.closest('[data-selo-id]');
-    if (hit && hit !== rEl) return undefined;
+    // hit may be rEl itself OR rEl's parent portal container (when rEl is .vm-content)
+    if (hit && hit !== rEl && hit !== rEl.parentElement) return undefined;
     // Don't steal focus from INPUT or BUTTON elements (e.g. portal bar)
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return undefined;
     rEl.focus({ preventScroll: true });
-    var rect = rEl.getBoundingClientRect();
+    // Measure coords relative to avatar layer so cursor center matches avatar center.
+    // Search only direct children to avoid finding nested portal layers.
+    var _layer = null;
+    for (var _i = 0; _i < rEl.children.length; _i++) {
+        if (rEl.children[_i].classList && rEl.children[_i].classList.contains('vm-avatar-layer')) {
+            _layer = rEl.children[_i]; break;
+        }
+    }
+    var rect = _layer ? _layer.getBoundingClientRect() : rEl.getBoundingClientRect();
     var cx = e.changedTouches ? e.changedTouches[0].clientX : e.clientX;
     var cy = e.changedTouches ? e.changedTouches[0].clientY : e.clientY;
     return { x: Math.round(cx - rect.left), y: Math.round(cy - rect.top) };
@@ -724,12 +733,25 @@ const renderer = Behaviors.collect(null, renderTick, function(_, __) {
         portalInp.value = pStr;
     }
 
-    var layer = rEl.querySelector('.vm-avatar-layer');
+    var layer = null;
+    for (var _li = 0; _li < rEl.children.length; _li++) {
+        if (rEl.children[_li].classList && rEl.children[_li].classList.contains('vm-avatar-layer')) {
+            layer = rEl.children[_li]; break;
+        }
+    }
     if (!layer) {
         layer = document.createElement('div');
         layer.className = 'vm-avatar-layer';
+        // Top offset = height of stats strip if directly inside rEl
+        var _strip = null;
+        for (var _si = 0; _si < rEl.children.length; _si++) {
+            if (rEl.children[_si].querySelector && rEl.children[_si].querySelector('.vm-clock')) {
+                _strip = rEl.children[_si]; break;
+            }
+        }
+        var _topOff = _strip ? (_strip.offsetHeight || 22) : 0;
         layer.style.cssText =
-            'position:absolute;top:22px;left:0;right:0;bottom:36px;' +
+            'position:absolute;top:' + _topOff + 'px;left:0;right:0;bottom:36px;' +
             'pointer-events:none;overflow:hidden;';
         rEl.appendChild(layer);
     }
