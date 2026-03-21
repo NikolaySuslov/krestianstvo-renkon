@@ -93,6 +93,27 @@ const balls = Behaviors.collect([], Events.or(click, _tick), (prev, ev) => {
 
 // ── VIEW ──────────────────────────────────────────────────────────────────
 
+// Inject app-specific styles once — travels in snapshot so portal windows
+// get the correct dark background and canvas sizing automatically.
+const _injectAppStyles = Behaviors.collect(false, Events.timer(100), function(done, _) {
+    if (done) return true;
+    var styleId = 'k-balls-styles';
+    if (!document.getElementById(styleId)) {
+        var s = document.createElement('style');
+        s.id = styleId;
+        s.textContent =
+            '.k-canvas{position:absolute;inset:0;width:100%;height:100%;}' +
+            '.k-label{position:absolute;top:4px;left:8px;font-size:11px;' +
+            'color:#aef;font-family:monospace;pointer-events:none;z-index:2;}';
+        document.head.appendChild(s);
+    }
+    var _bg = (rootEl && rootEl.parentElement &&
+               rootEl.parentElement.querySelector('.vm-label'))
+              ? rootEl.parentElement : rootEl;
+    if (_bg) _bg.style.background = '#0d0d1a';
+    return true;
+});
+
 const _touchTap = Events.listener(rootEl, 'touchstart', (e) => {
     if (e.cancelable) e.preventDefault();
     rootEl._lastTouch = Date.now();

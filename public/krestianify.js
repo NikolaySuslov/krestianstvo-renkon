@@ -165,7 +165,7 @@ var _KFY_VIEW_PREAMBLE_NAMES = new Set([
     'vTime', 'objects', 'clients',                   // model→view, pushed directly by VM
     'clientJoined', 'clientLeft', '_clientDiff',     // join/exit events, model→view
     'clientIdentity', 'myObject',                    // view-only, per-client identity
-    '_kfy_send', 'Renkon', 'rootEl',                 // view utilities
+    '_kfy_send', 'Renkon', 'rootEl', 'UI', 'vm',     // view utilities
     'uid', 'random', 'now', 'future',                  // model builtins — available everywhere
 ]);
 

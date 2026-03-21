@@ -11,7 +11,7 @@ const KrestianstvoUI = (() => {
 
     const C = {
         border:      '#ccc',
-        titleBg:     '#e8e8f4',
+        titleBg:     'rgba(232,232,244,0.80)',
         titleBorder: '#ccd',
         titleText:   '#446',
         statsText:   '#888',
@@ -22,7 +22,7 @@ const KrestianstvoUI = (() => {
         btnText:     '#446',
         closeBg:     '#fdd',
         closeText:   '#a44',
-        portalBg:    'rgba(245,245,255,0.97)',
+        portalBg:    'rgba(245,245,255,0.80)',
     };
 
     let _stylesInjected = false;
@@ -32,7 +32,7 @@ const KrestianstvoUI = (() => {
         const s = document.createElement('style');
         s.textContent = `
 .vm-root { position:absolute; inset:0; background:#f5f5f8; overflow:hidden; cursor:crosshair; outline:none; font-family:monospace; touch-action:none; }
-.avatar { position:absolute; width:36px; height:36px; border-radius:50%; border:3px solid #8899bb; background:#fff;
+.avatar { position:absolute; width:36px; height:36px; border-radius:50%; border:3px solid #8899bb; background:rgba(255,255,255,0.70);
     display:flex; align-items:center; justify-content:center;
     font-size:9px; font-weight:bold; color:#334; text-align:center; line-height:1.1;
     pointer-events:none; }
@@ -123,7 +123,7 @@ const KrestianstvoUI = (() => {
 
     function createSeloContainer(name, parentEl, opts) {
         opts = opts || {};
-        const onMove = opts.onMove, onClose = opts.onClose;
+        const onMove = opts.onMove, onClose = opts.onClose, onResize = opts.onResize, onRotate = opts.onRotate;
         const CHILD_W = 240, CHILD_H = 180;
         const el = document.createElement('div');
         el.dataset.seloId = name;
@@ -131,7 +131,7 @@ const KrestianstvoUI = (() => {
         el.style.cssText =
             'position:absolute;left:20px;top:40px;' +
             'width:' + CHILD_W + 'px;height:' + CHILD_H + 'px;' +
-            'background:rgba(250,250,254,0.80);backdrop-filter:blur(2px);' +
+            'background:rgba(255,255,255,0.40);' +
             'border:1.5px solid ' + C.border + ';' +
             'border-radius:6px;overflow:hidden;cursor:crosshair;' +
             'z-index:20;outline:none;box-shadow:0 2px 16px rgba(0,0,80,0.13);';
@@ -147,6 +147,7 @@ const KrestianstvoUI = (() => {
         closeBtn.addEventListener('mousedown', e => e.stopPropagation());
         closeBtn.addEventListener('click', e => {
             e.stopPropagation();
+            if (el._destroyDrag) el._destroyDrag();
             el.remove();
             if (onClose) onClose(name);
         });
@@ -175,8 +176,121 @@ const KrestianstvoUI = (() => {
             onMove: onMove ? (x, y) => onMove(name, x, y) : null
         });
 
+        // ── Resize handle — bottom-right corner ───────────────────────────
+        const resizeHandle = document.createElement('div');
+        resizeHandle.style.cssText =
+            'position:absolute;bottom:0;right:0;width:14px;height:14px;cursor:se-resize;' +
+            'z-index:30;opacity:0.4;' +
+            'background:linear-gradient(135deg,transparent 50%,' + C.border + ' 50%);' +
+            'border-bottom-right-radius:5px;';
+        function _startResize(startX, startY) {
+            var startW = el.offsetWidth, startH = el.offsetHeight;
+            var minW = 120, minH = 80;
+            var _lastSend = 0;
+            function onMove(cx, cy) {
+                var w = Math.max(minW, startW + cx - startX);
+                var h = Math.max(minH, startH + cy - startY);
+                // Throttle sends to ~20fps — model updates drive all rendering
+                var now = Date.now();
+                if (onResize && now - _lastSend >= 50) {
+                    _lastSend = now;
+                    onResize(name, w, h);
+                }
+            }
+            function onEnd(cx, cy) {
+                // Final send on release
+                var w = Math.max(minW, startW + cx - startX);
+                var h = Math.max(minH, startH + cy - startY);
+                if (onResize) onResize(name, w, h);
+            }
+            function onMouseMove(e) { onMove(e.clientX, e.clientY); }
+            function onMouseUp(e)   {
+                onEnd(e.clientX, e.clientY);
+                document.removeEventListener('mousemove', onMouseMove);
+                document.removeEventListener('mouseup',   onMouseUp);
+            }
+            function onTouchMove(e) { var t = e.touches[0]; onMove(t.clientX, t.clientY); }
+            function onTouchEnd(e)  {
+                var t = e.changedTouches[0];
+                onEnd(t.clientX, t.clientY);
+                document.removeEventListener('touchmove', onTouchMove);
+                document.removeEventListener('touchend',  onTouchEnd);
+            }
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup',   onMouseUp);
+            document.addEventListener('touchmove', onTouchMove, { passive: false });
+            document.addEventListener('touchend',  onTouchEnd);
+        }
+        resizeHandle.addEventListener('mousedown', function(e) {
+            e.stopPropagation(); e.preventDefault();
+            _startResize(e.clientX, e.clientY);
+        });
+        resizeHandle.addEventListener('touchstart', function(e) {
+            e.stopPropagation();
+            var t = e.touches[0];
+            _startResize(t.clientX, t.clientY);
+        }, { passive: false });
+        el.appendChild(resizeHandle);
+
+        // ── Rotate handle — bottom-left corner ────────────────────────────
+        const rotateHandle = document.createElement('div');
+        rotateHandle.title = 'Rotate';
+        rotateHandle.style.cssText =
+            'position:absolute;bottom:0;left:0;width:14px;height:14px;cursor:crosshair;' +
+            'z-index:30;opacity:0.4;' +
+            'background:linear-gradient(225deg,transparent 50%,' + C.border + ' 50%);' +
+            'border-bottom-left-radius:5px;';
+        (function() {
+            var _startAngle = 0, _lastSend = 0;
+            function _getCenter() {
+                var r = el.getBoundingClientRect();
+                return { cx: r.left + r.width / 2, cy: r.top + r.height / 2 };
+            }
+            function _angleFrom(cx, cy, ex, ey) {
+                return Math.atan2(ey - cy, ex - cx) * 180 / Math.PI;
+            }
+            function _startRotate(ex, ey) {
+                var c = _getCenter();
+                _startAngle = _angleFrom(c.cx, c.cy, ex, ey);
+                var cur = parseFloat(el.style.transform && el.style.transform.replace('rotate(','').replace('deg)','')) || 0;
+                _startAngle -= cur;
+            }
+            function _onMove(ex, ey) {
+                var c = _getCenter();
+                var angle = Math.round(_angleFrom(c.cx, c.cy, ex, ey) - _startAngle);
+                var now = Date.now();
+                if (onRotate && now - _lastSend >= 50) { _lastSend = now; onRotate(name, angle); }
+            }
+            function _onEnd(ex, ey) {
+                var c = _getCenter();
+                var angle = Math.round(_angleFrom(c.cx, c.cy, ex, ey) - _startAngle);
+                if (onRotate) onRotate(name, angle);
+            }
+            function _mm(e) { _onMove(e.clientX, e.clientY); }
+            function _mu(e)  { _onEnd(e.clientX, e.clientY);
+                document.removeEventListener('mousemove', _mm);
+                document.removeEventListener('mouseup', _mu); }
+            function _tm(e)  { var t = e.touches[0]; _onMove(t.clientX, t.clientY); }
+            function _tu(e)  { var t = e.changedTouches[0]; _onEnd(t.clientX, t.clientY);
+                document.removeEventListener('touchmove', _tm);
+                document.removeEventListener('touchend', _tu); }
+            rotateHandle.addEventListener('mousedown', function(e) {
+                e.stopPropagation(); e.preventDefault();
+                _startRotate(e.clientX, e.clientY);
+                document.addEventListener('mousemove', _mm);
+                document.addEventListener('mouseup', _mu);
+            });
+            rotateHandle.addEventListener('touchstart', function(e) {
+                e.stopPropagation();
+                var t = e.touches[0]; _startRotate(t.clientX, t.clientY);
+                document.addEventListener('touchmove', _tm, { passive: false });
+                document.addEventListener('touchend', _tu);
+            }, { passive: false });
+        })();
+        el.appendChild(rotateHandle);
+
         parentEl.appendChild(el);
-        return { el, titleBar, cinp, cbtn, closeBtn };
+        return { el, titleBar, cinp, cbtn, closeBtn, resizeHandle, rotateHandle };
     }
 
     function createPortalBar(rootEl, opts) {
@@ -194,7 +308,7 @@ const KrestianstvoUI = (() => {
             'z-index:20;box-sizing:border-box;';
 
         const inp = document.createElement('input');
-        inp.placeholder = disabled ? 'max depth reached' : 'new selo name\u2026';
+        inp.placeholder = disabled ? 'max depth reached' : 'selo / new:name';
         inp.disabled = disabled;
         inp.style.cssText =
             'flex:1;min-width:0;padding:3px 7px;border:1px solid ' + C.titleBorder + ';border-radius:3px;' +

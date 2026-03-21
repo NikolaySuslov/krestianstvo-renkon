@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Krestianstvo — Blank Joiner</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: #f5f5f8; font-family: monospace; }
+  #root { width: 100%; height: 100dvh; position: relative; }
+  #status { position: absolute; inset: 0; display: flex; align-items: center;
+            justify-content: center; font-size: 13px; color: #556; }
+</style>
+<script src="./krestianstvo-ui.js"></script>
+</head>
+<body>
+<div id="root">
+  <div id="status">Connecting…</div>
+</div>
+
+<script type="module">
+// ── Blank Joiner ────────────────────────────────────────────────────────────
+//
+// Joins OR creates a selo from a named app in the registry.
+//
+// URL params:
+//   ?k=seloId          — session id (required)
+//   ?app=balls         — app name from apps.js registry (optional)
+//   ?r=ws://...        — reflector URL override (optional)
+//
+// Behaviour:
+//   ?app=balls&k=1  → if selo "1" exists: join it (snapshot drives boot)
+//                   → if selo "1" is new:  boot with balls programs immediately
+//   ?k=1            → join existing selo "1" (blank joiner, snapshot-only)
+//
+// The app name can also be embedded in ?k=balls:1 (legacy portal format).
+
+import { KrestianstvoVM, krestianify, parseUrlParams, registerVM, _setAppResolver }
+    from '../index.js';
+import { resolveApp, installDOMHandlers, portalMount } from './apps.js';
+
+// Register app resolver so portal input inside the app can resolve named apps
+_setAppResolver(resolveApp);
+
+const params   = parseUrlParams('kfy-demo', 'ws://localhost:3000');
+const seloId   = params.seloId;   // full rawKey e.g. "color:1" or "1"
+const wsUrl    = params.reflector;
+
+// ?app= query param takes priority; otherwise use appName from "appName:seloId" in ?k=
+const urlParams = new URLSearchParams(window.location.search);
+const appName   = urlParams.get('app') || params.appName || null;
+const appDef    = appName ? (resolveApp(appName + ':') || {}).appDef : null;
+
+const statusEl  = document.getElementById('status');
+const rootEl    = document.getElementById('root');
+
+function setStatus(msg) { if (statusEl) statusEl.textContent = msg; }
+function hideStatus()   { if (statusEl) statusEl.style.display = 'none'; }
+
+setStatus(appDef
+    ? 'Starting ' + appName + ' in selo ' + seloId + '…'
+    : 'Joining selo ' + seloId + '…');
+
+const vm = new KrestianstvoVM({ seloId, wsUrl, maxDepth: params.maxDepth });
+
+installDOMHandlers(vm, rootEl, resolveApp);
+vm.viewAppExtra.label = seloId;
+
+if (appDef) {
+    // Known app — compile and start with programs so first-peer boots immediately.
+    // If joiner, _onSnapshotApply restores snapshot programs (same app, no conflict).
+    // Store buildUI on viewAppExtra so _rebuildViewPSWhenReady can call it.
+    if (appDef.buildUI) vm.viewAppExtra._buildUI = appDef.buildUI;
+    vm.modelStateKeys = appDef.modelNodes ? appDef.modelNodes.slice() : [];
+}
+
+if (appDef && appDef.app) {
+    // Known app — compile for model, use overrides for view/applyAction if present
+    const compiled = krestianify(appDef.app, appDef.modelNodes || []);
+    vm.modelStateKeys  = compiled.modelStateKeys;
+    vm.viewEchoExclude = compiled.viewToModel;
+    // Call buildUI now so DOM elements exist before viewPS first tick
+    if (appDef.buildUI) {
+        try { appDef.buildUI(rootEl, seloId, { portalMount: portalMount }); } catch(e) {}
+    }
+    // Inject KrestianstvoUI base styles (avatar, portal bar CSS)
+    if (typeof KrestianstvoUI !== 'undefined' && KrestianstvoUI.injectStyles) {
+        KrestianstvoUI.injectStyles();
+    }
+    // viewProgram/applyAction override: some apps (e.g. world) supply their own
+    // view program separately from UNIFIED_APP (same pattern as krestianify-demo.html)
+    vm.start({
+        modelProgram: compiled.modelProgram,
+        viewProgram:  appDef.viewProgram  || compiled.viewProgram,
+        applyAction:  appDef.applyAction  || compiled.applyAction || '',
+    });
+} else {
+    // Pure blank joiner — programs come from snapshot
+    vm.start({});
+}
+
+vm.onSeloJoined = ({ clientId, seloId }) => {
+    setStatus('Joined ' + seloId + ' · ' + clientId);
+    // Small delay so view has time to render before hiding status
+    setTimeout(hideStatus, 300);
+};
+
+registerVM(vm);
+</script>
+</body>
+</html>

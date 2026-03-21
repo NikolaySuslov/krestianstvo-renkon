@@ -51,9 +51,9 @@
 </div>
 <script type="module">
 import { KrestianstvoVM, krestianify,
-         registerVM, parseUrlParams } from '../index.js';
+         registerVM, parseUrlParams, _setAppResolver } from '../index.js';
 
-import { installDOMHandlers } from './dom-demo.js';
+import { installDOMHandlers, resolveApp, APPS } from './apps.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // UNIFIED APP — written as a plain Renkon program.
@@ -61,89 +61,39 @@ import { installDOMHandlers } from './dom-demo.js';
 // The developer just declares which nodes are "model" below.
 // ═══════════════════════════════════════════════════════════════════════════
 
-const UNIFIED_APP = `
-// ── MODEL nodes: shared, deterministic, replicated ────────────────────────
-const ticking = Behaviors.collect(
-    (_initialState && _initialState.ticking) || false,
-    Events.change(worldState),
-    (_, s) => s ? s.ticking : false
-);
-const windows = Behaviors.collect(
-    (_initialState && _initialState.windows) || {},
-    Events.change(worldState),
-    (_, s) => s ? s.windows : {}
-);
-const randomResult = Behaviors.collect(
-    (_initialState && _initialState.randomResult) || null,
-    Events.change(worldState),
-    (_, s) => s ? s.randomResult : null
-);
-const tick       = Events.receiver();
-const subTick    = Events.receiver();
-const counter    = Behaviors.collect(
-    (_initialState && _initialState.counter) || 0,
-    tick, function(prev, _) { return prev + 1; }
-);
-const subCounter = Behaviors.collect(
-    (_initialState && _initialState.subCounter) || 0,
-    subTick, function(prev, _) { return prev + 1; }
-);
+// ── Use APPS["world"] as single source of truth ───────────────────────────
+// All programs (model, view, applyAction) live in apps.js.
+// No more UNIFIED_APP / VIEW_PROGRAM / APPLY_ACTION defined here.
 
-// ── VIEW nodes: local per-client ──────────────────────────────────────────
-// (provided by the VIEW_PROGRAM in dom-demo.js — injected separately below)
-`;
+// Register app resolver so portal input resolves named apps
+_setAppResolver(resolveApp);
 
-// Declare which node names belong to the model (shared / deterministic).
-// Everything else is view-local.
-const MODEL_NODES = ['ticking', 'windows', 'randomResult', 'tick', 'subTick', 'counter', 'subCounter'];
-
-// The applyAction body is still explicit — it is pure JS state-machine logic,
-// not Renkon FRP, so it cannot be auto-split by the compiler.
-// (Same as dom-demo.js APPLY_ACTION.)
-import { APPLY_ACTION, VIEW_PROGRAM } from './dom-demo.js';
-
-// ═══════════════════════════════════════════════════════════════════════════
-// COMPILE
-// ═══════════════════════════════════════════════════════════════════════════
-
-
-const compiled = krestianify(UNIFIED_APP, MODEL_NODES);
-
-console.group('%c[krestianify] compilation result', 'color:#0f9;font-weight:bold');
-console.log('modelStateKeys:', compiled.modelStateKeys);
-console.log('modelToView:',    [...compiled.modelToView]);
-console.log('viewToModel:',    [...compiled.viewToModel]);
-console.log('modelProgram:\n', compiled.modelProgram);
-console.groupEnd();
-
-// dom-demo.js provides the VIEW_PROGRAM — append it to krestianify's view output
-// (krestianify's viewProgram will be empty here since UNIFIED_APP has no view nodes)
-const finalViewProgram = compiled.viewProgram + '\n' + VIEW_PROGRAM;
+const worldApp = APPS["world"];
+const compiled = krestianify(worldApp.app, worldApp.modelNodes);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // BOOT
 // ═══════════════════════════════════════════════════════════════════════════
 
-
 function bootVM(rootEl, seloId, wsUrl, delay) {
     setTimeout(() => {
-        const vm = new KrestianstvoVM({ seloId, wsUrl });
-        vm.modelStateKeys = compiled.modelStateKeys;
-        installDOMHandlers(vm, rootEl);
+        const vm = new KrestianstvoVM({ seloId, wsUrl, maxDepth: params.maxDepth });
+        vm.modelStateKeys  = compiled.modelStateKeys;
+        vm.viewEchoExclude = compiled.viewToModel;
+        installDOMHandlers(vm, rootEl, resolveApp);
         vm.start({
             modelProgram: compiled.modelProgram,
-            viewProgram:  finalViewProgram,
-            applyAction:  APPLY_ACTION,
+            viewProgram:  worldApp.viewProgram,
+            applyAction:  worldApp.applyAction,
         });
         registerVM(vm);
     }, delay);
 }
 
-(async () => {
-const { seloId, wsUrl } = parseUrlParams('kfy-demo', 'ws://localhost:3000');
+const params = parseUrlParams('kfy-demo', 'ws://localhost:3000');
+const { seloId, wsUrl } = params;
 bootVM(document.getElementById('vmA-root'), seloId, wsUrl, 0);
 bootVM(document.getElementById('vmB-root'), seloId, wsUrl, 350);
-})();
 
 
 </script>

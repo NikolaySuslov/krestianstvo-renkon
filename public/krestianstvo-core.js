@@ -98,7 +98,7 @@ export function selo({
             const vm = new _KrestianstvoVM({ seloId, wsUrl });
             vm.modelStateKeys  = compiled.modelStateKeys;
             vm.viewEchoExclude = compiled.viewToModel;
-            vm.viewAppExtra    = { rootEl };
+            vm.viewAppExtra    = { rootEl, _buildUI: buildUI || null };
             // Merge compiler-generated applyAction (e.g. timer seeds) with user-supplied
             const _applyAction = [compiled.applyAction, applyAction].filter(Boolean).join('\n');
             vm.start({

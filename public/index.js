@@ -15,12 +15,16 @@ import { KrestianstvoVM, parseUrlParams } from './krestianstvo-vm.js';
 import { registerVM }   from './vm-lifecycle.js';
 import { krestianify }  from './krestianify.js';
 import { _injectDeps }  from './krestianstvo-core.js';
+import { _setKrestianify, _setAppResolver } from './krestianstvo-vm.js';
 
 // Inject ProgramState once — all consumers get it via _getProgramState().
 init({ ProgramState });
 
 // Inject deps into core so selo() works without explicit passing.
 _injectDeps({ KrestianstvoVM, registerVM, krestianify, parseUrlParams });
+_setKrestianify(krestianify);
+// _setAppResolver is exported for app-level code to register named app lookup
+export { _setAppResolver } from './krestianstvo-vm.js';
 
 export { selo }            from './krestianstvo-core.js';
 export { KrestianstvoVM, parseUrlParams } from './krestianstvo-vm.js';
