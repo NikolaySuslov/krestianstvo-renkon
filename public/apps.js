@@ -651,7 +651,7 @@ const _moveDoc = Events.or(
     Events.listener(document, 'mousemove', _clickHandler),
     Events.listener(document, 'touchmove', _clickHandler)
 );
-const _timerMove  = Events.timer(100);
+const _timerMove  = Events.timer(50);
 const _mouseCoords = {t: _timerMove, e: _moveDoc};
 const _sendMove = Behaviors.collect(null, Events.or(_mouseCoords, _clickDoc), function(_, pos) {
     if (!pos) return null;
