@@ -744,17 +744,29 @@ const children$ = Behaviors.collect(
     //   4. Re-pushes all model state so the new viewPS shows current values
     // snap may be a real snapshot payload (from _onSnapshotApply) or {} (from
     // first-peer inherit path — no state to push yet).
-    _rebuildViewPSWhenReady(snap, attempts) {
+    _rebuildViewPSWhenReady(snap) {
+
         snap = snap || {};
-        if (attempts === undefined) attempts = 25; // 25 × 20ms = 500ms max
         const _self = this;
-        const _rootEl0 = _self.viewAppExtra && _self.viewAppExtra.rootEl;
-        if (!_rootEl0) {
-            if (attempts > 0) setTimeout(() => _self._rebuildViewPSWhenReady(snap, attempts - 1), 20);
-            else console.warn('[VM] _rebuildViewPSWhenReady: rootEl never set');
-            return;
-        }
-        // ── Build DOM ───────────────────────────────────────────────────────
+
+        const observer = new window.MutationObserver((mutations, obs) => {
+            const _rootEl0 = _self.viewAppExtra && _self.viewAppExtra.rootEl;
+            if (_rootEl0) {
+                console.log("Element is now in the DOM!");
+                obs.disconnect(); // Stop looking once found
+                 _self._buildDomFromSnap(_rootEl0, snap)
+            }
+        });
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+    }
+
+    _buildDomFromSnap(_rootEl0, snap) {
+         const _self = this;
+
+                // ── Build DOM ───────────────────────────────────────────────────────
         // VM is DOM-agnostic: it calls buildUI(rootEl, label) as an opaque callback.
         // buildUI may return a new mount element (e.g. a .vm-content wrapper for
         // portal containers) — if so, viewAppExtra.rootEl is updated to that element.
