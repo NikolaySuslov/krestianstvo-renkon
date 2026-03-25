@@ -91,7 +91,7 @@ const balls = Behaviors.collect([], Events.or(click, _tick), (prev, ev) => {
 
 // Inject app-specific styles once — travels in snapshot so portal windows
 // get the correct dark background and canvas sizing automatically.
-const _injectAppStyles = Behaviors.collect(false, Events.timer(100), function(done, _) {
+const _injectAppStyles = Behaviors.collect(false, Events.once(vTime), function(done, _) {
     if (done) return true;
     var styleId = 'k-balls-styles';
     if (!document.getElementById(styleId)) {
@@ -182,7 +182,7 @@ const tick    = Events.timer(1000);
 const change  = Events.or(incr, decr, tick);
 const counter = Behaviors.collect(0, change, (prev, ch) => prev + ch);
 
-const _injectCounterStyles = Behaviors.collect(false, Events.timer(100), function(done,_){
+const _injectCounterStyles = Behaviors.collect(false, Events.once(vTime), function(done,_){
     if (done) return true;
     var sid = 'k-counter-styles';
     if (!document.getElementById(sid)) {
@@ -235,7 +235,7 @@ const _portalClockSync = Behaviors.collect(null, Events.change(vTime), function(
 APPS["color"] = {
     modelNodes: ['counter', 'color'],
     app: `
-const _injectColorStyles = Behaviors.collect(false, Events.timer(100), function(done,_){
+const _injectColorStyles = Behaviors.collect(false, Events.once(vTime), function(done,_){
     if (done) return true;
     var sid = 'k-color-styles';
     if (!document.getElementById(sid)) {
@@ -319,8 +319,8 @@ const _subTick = Events.receiver();
 const _tickLoop = Behaviors.collect(null, _tick, (_, __) => {
     if (!running) return null;
     future(now(), 1000, '_tick', { type: '_tick' });
-    for (var i = 1; i <= 9; i++) future(now(), i * 100, '_subTick', { step: i });
-    return null;
+    Array.from({ length: 9 }, (_, i) => i + 1)
+     .forEach(i => future(now(), i * 100, '_subTick', { step: i }));
 });
 
 // counter increments on each main tick
@@ -334,7 +334,7 @@ const subCounter = Behaviors.collect(0, _subTick, (prev, _) => prev + 1);
 
 // ── VIEW ────────────────────────────────────────────────────────────────────
 
-const _injectTimerStyles = Behaviors.collect(false, Events.timer(100), function(done,_){
+const _injectTimerStyles = Behaviors.collect(false, Events.once(vTime), function(done,_){
     if (done) return true;
     var sid = 'k-timer-styles';
     if (!document.getElementById(sid)) {
@@ -431,7 +431,7 @@ const subCounter = Behaviors.collect(
 );
 
 // ── VIEW nodes: local per-client ──────────────────────────────────────────
-// (provided by the VIEW_PROGRAM in dom-demo.js — injected separately below)
+// (provided by the VIEW_PROGRAM)
 `,
     viewProgram: `
 
@@ -448,7 +448,8 @@ const setPortal    = Events.receiver();
 // ── buildUI — create title strip once ────────────────────────────────────
 // Runs once: when rootEl is available and title strip not yet present.
 // Creates .vm-clock, .vm-peers, .vm-queue so the renderer can update them.
-const _buildUI = Behaviors.collect(false, Events.timer(50), function(done, _) {
+const _buildUI = Behaviors.collect(false, Events.once(vTime), function(done, _) {
+console.log('buildUI timer fired', { done, rootEl, vTime });
     if (done) return true;
     var rEl = rootEl;
     if (!rEl || rEl.querySelector('.vm-clock')) return true;
@@ -479,7 +480,7 @@ const _buildUI = Behaviors.collect(false, Events.timer(50), function(done, _) {
 // ── onSpawn wiring — set up child VM portal windows ───────────────────────
 // Renkon.app.vm is the KrestianstvoVM instance.
 // We set vm.onSpawn once so child VMs get portal containers.
-const _spawnWired = Behaviors.collect(false, Events.timer(50), function(done, _) {
+const _spawnWired = Behaviors.collect(false, Events.once(vTime), function(done, _) {
     if (done) return true;
     var vm = Renkon.app.vm;
     var app = Renkon.app;
@@ -490,11 +491,10 @@ const _spawnWired = Behaviors.collect(false, Events.timer(50), function(done, _)
             var windowName = opts.name;          // unique key for this window
             var childVM    = opts.vm;
             var targetSeloId = childVM.seloId;   // actual seloId the child connected to
-            var _existing = false;
-            for (var _i = 0; _i < parentEl.children.length; _i++) {
-                if (parentEl.children[_i].dataset && parentEl.children[_i].dataset.seloId === windowName) { _existing = true; break; }
-            }
+
+            const _existing = [...parentEl.children].some(child => child.dataset?.seloId === windowName);
             if (_existing) return;
+            
             var ws = parentVM.ws;
             // createSeloContainer uses windowName as data-selo-id (unique DOM key)
             // but shows targetSeloId as the label and cinp default value
@@ -558,11 +558,15 @@ const _spawnWired = Behaviors.collect(false, Events.timer(50), function(done, _)
 
             childVM.onSpawn = makeSpawnHandler(el, childVM);
             childVM.onClose = function(closeOpts) {
-                var childEl = null;
-                for (var _i = 0; _i < el.children.length; _i++) {
-                    if (el.children[_i].dataset && el.children[_i].dataset.seloId === closeOpts.name) { childEl = el.children[_i]; break; }
+                // Convert HTMLCollection to Array and find the matching child
+                const childEl = [...el.children].find(child => 
+                    child.dataset?.seloId === closeOpts.name
+                );
+                // If found, execute cleanup and remove
+                if (childEl) {
+                    childEl._destroyDrag?.(); 
+                    childEl.remove();
                 }
-                if (childEl) { if (childEl._destroyDrag) childEl._destroyDrag(); childEl.remove(); }
             };
 
             // Join button — re-joins this child VM to a different seloId
@@ -587,13 +591,16 @@ const _spawnWired = Behaviors.collect(false, Events.timer(50), function(done, _)
     vm.onClose = function(opts) {
         var rEl = app.rootEl;
         if (!rEl) return;
-        var childEl = null;
-        for (var i = 0; i < rEl.children.length; i++) {
-            if (rEl.children[i].dataset && rEl.children[i].dataset.seloId === opts.name) {
-                childEl = rEl.children[i]; break;
-            }
-        }
-        if (childEl) { if (childEl._destroyDrag) childEl._destroyDrag(); childEl.remove(); }
+
+         // Convert HTMLCollection to Array and find the matching child
+                const childEl = [...rEl.children].find(child => 
+                    child.dataset?.seloId === opts.name
+                );
+                // If found, execute cleanup and remove
+                if (childEl) {
+                    childEl._destroyDrag?.(); 
+                    childEl.remove();
+                }
     };
 
     // Space key → toggleTick on active VM
@@ -632,12 +639,10 @@ function _clickHandler(e) {
     rEl.focus({ preventScroll: true });
     // Measure coords relative to avatar layer so cursor center matches avatar center.
     // Search only direct children to avoid finding nested portal layers.
-    var _layer = null;
-    for (var _i = 0; _i < rEl.children.length; _i++) {
-        if (rEl.children[_i].classList && rEl.children[_i].classList.contains('vm-avatar-layer')) {
-            _layer = rEl.children[_i]; break;
-        }
-    }
+
+    const _layer = [...rEl.children].find(child => 
+    child.classList?.contains('vm-avatar-layer'));
+
     var rect = _layer ? _layer.getBoundingClientRect() : rEl.getBoundingClientRect();
     var cx = e.changedTouches ? e.changedTouches[0].clientX : e.clientX;
     var cy = e.changedTouches ? e.changedTouches[0].clientY : e.clientY;
@@ -690,9 +695,16 @@ function _parsePortalInput(inputVal) {
 const portalText = Behaviors.collect('', setPortal,
     function(_, ev) { return (ev && typeof ev === 'object') ? (ev.value || '') : (ev || ''); });
 
+const showSpwnedChildren = (()=>{
+    console.log("Childs: ", clientJoined);
+    })();
+
 // ── renderer — 60hz DOM update ────────────────────────────────────────────
 const renderTick = Events.timer(16);
-const renderer = Behaviors.collect(null, renderTick, function(_, __) {
+const renderer = ((renderTick)=>
+//Behaviors.collect(null, renderTick, function(_, __) {
+
+{
     var rEl  = rootEl;
     if (!rEl || !UI) return null;
     var objs    = objects || {};
@@ -712,7 +724,10 @@ const renderer = Behaviors.collect(null, renderTick, function(_, __) {
     if (peersEl) peersEl.textContent = Object.keys(objs).length;
     if (queueEl) queueEl.textContent = running ? 'T:' + cnt + ' S:' + sub : 'stopped';
 
-    UI.createPortalBar(rEl, {
+    var portalBar = rEl.querySelector('.vm-portal-bar');
+
+    if (!portalBar) {
+    portalBar = UI.createPortalBar(rEl, {
         disabled: atMax,
         onInput: atMax ? null : function(value) {
             if (ws && ws.readyState === WebSocket.OPEN)
@@ -723,9 +738,10 @@ const renderer = Behaviors.collect(null, renderTick, function(_, __) {
             var parsed = _parsePortalInput(inputVal);
             ws.send(JSON.stringify({ type: 'spawnSelo', data: { seloId: parsed.seloId, appName: parsed.appName || null, maxDepth: parsed.maxDepth } }));
         },
-    });
+    }).bar;
+};
 
-    var portalBar = rEl.querySelector('.vm-portal-bar');
+    //var portalBar = rEl.querySelector('.vm-portal-bar');
     var portalInp = portalBar && portalBar.querySelector('input');
     if (portalInp && !atMax && document.activeElement !== portalInp) {
         var pStr = (typeof portalText === 'object' && portalText !== null)
@@ -733,22 +749,17 @@ const renderer = Behaviors.collect(null, renderTick, function(_, __) {
         portalInp.value = pStr;
     }
 
-    var layer = null;
-    for (var _li = 0; _li < rEl.children.length; _li++) {
-        if (rEl.children[_li].classList && rEl.children[_li].classList.contains('vm-avatar-layer')) {
-            layer = rEl.children[_li]; break;
-        }
-    }
+    var layer = [...rEl.children].find(child => 
+    child.classList?.contains('vm-avatar-layer'));
+
     if (!layer) {
         layer = document.createElement('div');
         layer.className = 'vm-avatar-layer';
         // Top offset = height of stats strip if directly inside rEl
-        var _strip = null;
-        for (var _si = 0; _si < rEl.children.length; _si++) {
-            if (rEl.children[_si].querySelector && rEl.children[_si].querySelector('.vm-clock')) {
-                _strip = rEl.children[_si]; break;
-            }
-        }
+
+         const _strip = [...rEl.children].find(child => 
+            child.querySelector?.('.vm-clock'));
+
         var _topOff = _strip ? (_strip.offsetHeight || 22) : 0;
         layer.style.cssText =
             'position:absolute;top:' + _topOff + 'px;left:0;right:0;bottom:36px;' +
@@ -781,10 +792,14 @@ const renderer = Behaviors.collect(null, renderTick, function(_, __) {
     });
 
     return null;
-});
+})(renderTick);
 
 // ── _winSync — apply window positions from model ──────────────────────────
-const _winSync = Behaviors.collect(null, Events.change($windows), function(_, wins) {
+const _winSync = (() => 
+//Behaviors.collect(null, Events.change($windows), function(_, wins) {
+{
+    console.log('Window sync', { windows });
+    let wins = windows;
     if (!wins) return null;
     var app = Renkon.app;
     app.windowPositions = wins;
@@ -794,12 +809,9 @@ const _winSync = Behaviors.collect(null, Events.change($windows), function(_, wi
             var name = e[0], pos = e[1];
             // Only match DIRECT children of rEl — not nested portal windows
             // which have the same data-selo-id at deeper levels.
-            var el = null;
-            for (var i = 0; i < rEl.children.length; i++) {
-                if (rEl.children[i].dataset && rEl.children[i].dataset.seloId === name) {
-                    el = rEl.children[i]; break;
-                }
-            }
+
+            const el = [...rEl.children].find(child => child.dataset?.seloId === name);
+
             if (el) {
                 if (pos.x != null) el.style.left = pos.x + 'px';
                 if (pos.y != null) el.style.top  = pos.y + 'px';
@@ -810,23 +822,14 @@ const _winSync = Behaviors.collect(null, Events.change($windows), function(_, wi
         });
     }
     return null;
-});
-// ── Portal titleBar clock sync ────────────────────────────────────────────
-const _portalClockSync = Behaviors.collect(null, Events.change(vTime), function(_, t) {
-    var _p = rootEl && rootEl.parentElement;
-    if (!_p) return null;
-    var _clk = _p.querySelector('.vm-clock');
-    if (_clk) _clk.textContent = t || 0;
-    var _prs = _p.querySelector('.vm-peers');
-    if (_prs) _prs.textContent = Object.keys(objects || {}).length;
-    return null;
-});
+})();
 `,
     applyAction: `
     if (msg.type === 'tick') {
         if (state.ticking) {
             future(state.time, 1000, 'tick', {});
-            for (var _i = 1; _i <= 9; _i++) future(state.time, _i * 100, 'subTick', { step: _i });
+                Array.from({ length: 9 }, (_, i) => i + 1)
+     .forEach(i => future(state.time, i * 100, 'subTick', { step: i }));
         }
         return Object.assign({}, state, { randomResult: random() });
     }
@@ -834,7 +837,8 @@ const _portalClockSync = Behaviors.collect(null, Events.change(vTime), function(
         var _nowTicking = !state.ticking;
         if (_nowTicking) {
             future(state.time, 1000, 'tick', {});
-            for (var _i = 1; _i <= 9; _i++) future(state.time, _i * 100, 'subTick', { step: _i });
+            Array.from({ length: 9 }, (_, i) => i + 1)
+     .forEach(i => future(state.time, i * 100, 'subTick', { step: i }));
         }
         return Object.assign({}, state, { ticking: _nowTicking });
     }
