@@ -745,10 +745,11 @@ const children$ = Behaviors.collect(
     // snap may be a real snapshot payload (from _onSnapshotApply) or {} (from
     // first-peer inherit path — no state to push yet).
     _rebuildViewPSWhenReady(snap) {
-
         snap = snap || {};
         const _self = this;
-
+        const _rootEl0 = _self.viewAppExtra && _self.viewAppExtra.rootEl;
+        if (_rootEl0) {_self._buildDomFromSnap(_rootEl0, snap)};
+        
         const observer = new window.MutationObserver((mutations, obs) => {
             const _rootEl0 = _self.viewAppExtra && _self.viewAppExtra.rootEl;
             if (_rootEl0) {
