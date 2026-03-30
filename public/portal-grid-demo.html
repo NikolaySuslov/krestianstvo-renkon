@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Krestianstvo — Portal Grid Demo</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: #0d0d1a; font-family: monospace; }
+  #layout { display: flex; width: 100%; height: 100dvh; gap: 4px; padding: 24px 4px 4px; }
+  .pane { flex: 1; position: relative; overflow: hidden; border-radius: 6px; }
+  #label-bar { position: fixed; top: 0; left: 0; right: 0; height: 22px;
+    background: rgba(10,10,30,0.9); display: flex; align-items: center;
+    justify-content: center; gap: 60px; font-size: 11px; color: #88a; z-index: 100;
+    border-bottom: 1px solid #334; }
+</style>
+<script src="./krestianstvo-ui.js"></script>
+</head>
+<body>
+<div id="label-bar">
+  <span>&#9670; grid-world-1 &mdash; 9 portals + links to world-2</span>
+  <span>&#9670; grid-world-2 &mdash; 9 portals + balls app</span>
+</div>
+<div id="layout">
+  <div class="pane"><div id="vm1" style="position:absolute;inset:0;background:#f5f5f8;overflow:hidden;touch-action:none;user-select:none;cursor:crosshair;outline:none;"></div></div>
+  <div class="pane"><div id="vm2" style="position:absolute;inset:0;background:#f5f5f8;overflow:hidden;touch-action:none;user-select:none;cursor:crosshair;outline:none;"></div></div>
+</div>
+
+<script type="module">
+import { KrestianstvoVM, krestianify, parseUrlParams, registerVM, _setAppResolver }
+    from '../index.js';
+import { installDOMHandlers, resolveApp, APPS } from './apps.js';
+
+_setAppResolver(resolveApp);
+
+const wsUrl = parseUrlParams('grid', 'ws://localhost:3000').reflector;
+
+// Grid layout constants — shared between both worlds
+const COLS = 3, ROWS = 3, CW = 160, CH = 120, GAP = 20, OX = 40, OY = 40;
+
+async function bootGridWorld(rootEl, seloId, delay) {
+    await new Promise(r => setTimeout(r, delay));
+    const worldApp = APPS['world'];
+    const compiled  = krestianify(worldApp.app, worldApp.modelNodes);
+    const vm = new KrestianstvoVM({ seloId, wsUrl });
+    vm.modelStateKeys  = compiled.modelStateKeys;
+    vm.viewEchoExclude = compiled.viewToModel;
+    installDOMHandlers(vm, rootEl, resolveApp);
+    vm.start({
+        modelProgram: compiled.modelProgram,
+        viewProgram:  worldApp.viewProgram,
+        applyAction:  worldApp.applyAction,
+    });
+    registerVM(vm);
+    await new Promise(resolve => { vm.onSeloJoined = () => resolve(); });
+    return vm;
+}
+
+function sendWhenReady(ws, msg) {
+    if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify(msg));
+        return true;
+    }
+    return false;
+}
+
+async function waitTick(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function setup() {
+    // Boot both worlds in parallel
+    const [vm1, vm2] = await Promise.all([
+        bootGridWorld(document.getElementById('vm1'), 'grid-world-1', 0),
+        bootGridWorld(document.getElementById('vm2'), 'grid-world-2', 150),
+    ]);
+
+    await waitTick(600); // let viewPS start and process first ticks
+
+    const ws1 = vm1.ws, ws2 = vm2.ws;
+
+    // ── World:2: create 9 named portal rects (p1..p9) in 3×3 grid ──────────
+    for (let row = 0; row < ROWS; row++) {
+        for (let col = 0; col < COLS; col++) {
+            const i    = row * COLS + col + 1;
+            const name = 'p' + i;
+            const x    = OX + col * (CW + GAP);
+            const y    = OY + row * (CH + GAP);
+            sendWhenReady(ws2, { type: 'createNamedPortal', data: { name, x, y, w: CW, h: CH } });
+        }
+    }
+
+    // World:2: spawn balls app window
+    sendWhenReady(ws2, { type: 'spawnSelo',
+        data: { seloId: 'grid-balls', appName: 'balls', maxDepth: null } });
+
+    await waitTick(400); // let world:2 process portals
+
+    // ── World:1: create 9 named portal rects (q1..q9) in same grid ──────────
+    for (let row = 0; row < ROWS; row++) {
+        for (let col = 0; col < COLS; col++) {
+            const i    = row * COLS + col + 1;
+            const name = 'q' + i;
+            const x    = OX + col * (CW + GAP);
+            const y    = OY + row * (CH + GAP);
+            sendWhenReady(ws1, { type: 'createNamedPortal', data: { name, x, y, w: CW, h: CH } });
+        }
+    }
+
+    await waitTick(400); // let world:1 process portals and push to viewPS
+
+    // ── World:1: create 9 links q_i → p_i (one-way, world:1 views world:2) ──
+    // Read portal state from vm1's viewPS (exposed by _exposePortalState)
+    const portals1 = (vm1.viewPS && vm1.viewPS.app && vm1.viewPS.app._portalState) || {};
+    const pNames1  = Object.values(portals1).map(p => p.name);
+    console.log('[grid] world:1 portals:', pNames1);
+
+    for (let i = 1; i <= 9; i++) {
+        const fromPortal = Object.values(portals1).find(p => p.name === 'q' + i);
+        if (!fromPortal) {
+            console.warn('[grid] portal q' + i + ' not found in', pNames1);
+            continue;
+        }
+        sendWhenReady(ws1, { type: 'createLink', data: {
+            fromPortalId: fromPortal.id,
+            toSelo:       'grid-world-2',
+            toPortalName: 'p' + i,
+            maxDepth:     null,
+        }});
+        await waitTick(30); // small stagger for deterministic uid() ordering
+    }
+
+    console.log('[grid] Setup complete: 9×9 portal grid, balls visible in world:1 through portals');
+}
+
+setup().catch(console.error);
+</script>
+</body>
+</html>

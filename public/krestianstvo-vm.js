@@ -829,6 +829,13 @@ const children$ = Behaviors.collect(
         });
     }
 
+    // _children — Map of windowName → child VM (set by _diffChildren)
+    // Accessible so view nodes can look up child VMs by portalId
+    get _children() {
+        // Return the current children map from the meta PS if available
+        return this._childrenMap || new Map();
+    }
+
     // _diffChildren — called from children$ reducer
     _diffChildren(prev, names) {
         const next = new Map(prev);
@@ -851,8 +858,19 @@ const children$ = Behaviors.collect(
             }
             const _childMaxDepth = _entryDepth != null ? _entryDepth : this.maxDepth;
             const child = new KrestianstvoVM({ wsUrl: this.wsUrl, seloId: targetSeloId, depth: this.depth + 1, maxDepth: _childMaxDepth });
+            child._parent = this; // parent VM reference for chain traversal
             child.modelStateKeys = this.modelStateKeys || [];
             child.onClose = this.onClose;
+            // Tag portal/link child VMs so the portal renderer can find them
+            if (entry && typeof entry === 'object' && entry.isPortal) {
+                child._isPortal   = true;
+                child._windowName = windowName;
+                // Link-based portals use linkId; old pairing-based used portalId
+                if (entry.linkId)    child._linkId    = entry.linkId;
+                if (entry.portalId)  child._portalId  = entry.portalId;
+                child._portalAlreadyPaired = !!entry.alreadyPaired;
+
+            }
             const _parent = this;
             const _spawnName = name;
             const _spawnDepth = this.depth + 1;
@@ -869,6 +887,8 @@ const children$ = Behaviors.collect(
                 if (typeof _parent.onSpawn === 'function') {
                     _parent.onSpawn({ name: _spawnName, vm: child, depth: _spawnDepth });
                 }
+                // Link-based portals: no auto-pairing messages needed.
+                // _portalLinkSync reads remote portal state directly via childVM.viewPS.app._portalState.
             };
             // Child VMs start blank — they receive model+view programs from the
             // snapshot of the target selo (joiner path). If the child becomes the
@@ -916,6 +936,7 @@ const children$ = Behaviors.collect(
                 if (this.onClose) this.onClose({ name });
             }
         });
+        this._childrenMap = next;
         return next;
     }
 
@@ -1106,6 +1127,7 @@ const children$ = Behaviors.collect(
         var appRef = {
             viewPS:           this.viewPS,
             metaPS:           this.ps,
+            vm:               this,    // KrestianstvoVM — accessible as app.vm in applyAction
             _ps:              null,
             ws:               this.ws,
             initialObjects:   initialObjects,
@@ -1132,6 +1154,49 @@ const children$ = Behaviors.collect(
         }
         ps.options = { once: true };
         return { ps: ps, send: this._makeSend(appRef), appRef: appRef };
+    }
+
+    // ── injectModelMessage ───────────────────────────────────────────────
+    // Cross-world model-to-model message without reflector round-trip.
+    // Called by another VM's applyAction (via portal object) to inject a
+    // message directly into this VM's model queue at this VM's current vTime.
+    //
+    // Correct Croquet multi-world architecture:
+    //   World:1 model (deterministic) → calls vm2.injectModelMessage(...)
+    //   → message enters vm2's queue at vm2's vTime
+    //   → vm2's next drain processes it deterministically
+    //   → vm2's VIEW applies result to all vm2 peers
+    //
+    // Every peer running world:1 produces the same call → every peer's vm2
+    // processes the same message → no reflector needed, no network round-trip.
+    //
+    // @param type  — message type string (handled by target VM's applyAction)
+    // @param data  — message data object
+    // @param fromSelo — source selo id (for tracing)
+    injectModelMessage(type, data, fromSelo) {
+        if (!this.modelPS) {
+            console.warn('[injectModelMessage] target VM not ready:', this.seloId);
+            return;
+        }
+        // Get target VM's current vTime for deterministic scheduling
+        const _wss    = this._getModelNode(this.modelPS, 'worldState');
+        const _vTime  = (_wss && _wss.time) || 0;
+        // Wrap as client_msg — same envelope that _vm_enqueue processes from WS stream.
+        // _enqueue extracts .data and queues at .serverTime for deterministic drain.
+        const _clientMsg = {
+            type:       'client_msg',
+            data: {
+                type:       type,
+                data:       data || {},
+                from:       fromSelo || 'portal',
+                serverTime: _vTime,
+                _future:    false,
+                _injected:  true,
+            },
+            vTime: _vTime,
+        };
+        // Feed into _raw — same path as WS stream, goes through _enqueue → worldState
+        this.modelPS.registerEvent('_raw', _clientMsg);
     }
 
     // ── _restoreModelSelo ─────────────────────────────────────────────────

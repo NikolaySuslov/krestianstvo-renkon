@@ -19,11 +19,15 @@ export const APPS = {};
 // Include in every app's VIEW section so stats update for all apps in portals.
 export const PORTAL_CLOCK_SYNC = `
 const _portalClockSync = Behaviors.collect(null, Events.change(vTime), function(_, t) {
-    var _p = rootEl && rootEl.parentElement;
-    if (!_p) return null;
-    var _clk = _p.querySelector('.vm-clock');
+    // Walk up from rootEl to find nearest container with .vm-clock (titleBar stats)
+    var _p = rootEl;
+    var _clk = null;
+    while (_p && _p.parentElement && !_clk) {
+        _p = _p.parentElement;
+        _clk = _p.querySelector && _p.querySelector(':scope > * > .vm-clock, :scope > .vm-clock');
+    }
     if (_clk) _clk.textContent = t || 0;
-    var _prs = _p.querySelector('.vm-peers');
+    var _prs = _clk && _clk.parentElement && _clk.parentElement.querySelector('.vm-peers');
     if (_prs) _prs.textContent = Object.keys(objects || {}).length;
     return null;
 });
@@ -151,11 +155,15 @@ const _render = Behaviors.collect(null, Events.or(Events.change(balls), _frame),
 });
 // ── Portal titleBar clock sync ────────────────────────────────────────────
 const _portalClockSync = Behaviors.collect(null, Events.change(vTime), function(_, t) {
-    var _p = rootEl && rootEl.parentElement;
-    if (!_p) return null;
-    var _clk = _p.querySelector('.vm-clock');
+    // Walk up from rootEl to find nearest container with .vm-clock (titleBar stats)
+    var _p = rootEl;
+    var _clk = null;
+    while (_p && _p.parentElement && !_clk) {
+        _p = _p.parentElement;
+        _clk = _p.querySelector && _p.querySelector(':scope > * > .vm-clock, :scope > .vm-clock');
+    }
     if (_clk) _clk.textContent = t || 0;
-    var _prs = _p.querySelector('.vm-peers');
+    var _prs = _clk && _clk.parentElement && _clk.parentElement.querySelector('.vm-peers');
     if (_prs) _prs.textContent = Object.keys(objects || {}).length;
     return null;
 });
@@ -206,11 +214,15 @@ const _render = Behaviors.collect(null, counter, (_, n) => {
 });
 // ── Portal titleBar clock sync ────────────────────────────────────────────
 const _portalClockSync = Behaviors.collect(null, Events.change(vTime), function(_, t) {
-    var _p = rootEl && rootEl.parentElement;
-    if (!_p) return null;
-    var _clk = _p.querySelector('.vm-clock');
+    // Walk up from rootEl to find nearest container with .vm-clock (titleBar stats)
+    var _p = rootEl;
+    var _clk = null;
+    while (_p && _p.parentElement && !_clk) {
+        _p = _p.parentElement;
+        _clk = _p.querySelector && _p.querySelector(':scope > * > .vm-clock, :scope > .vm-clock');
+    }
     if (_clk) _clk.textContent = t || 0;
-    var _prs = _p.querySelector('.vm-peers');
+    var _prs = _clk && _clk.parentElement && _clk.parentElement.querySelector('.vm-peers');
     if (_prs) _prs.textContent = Object.keys(objects || {}).length;
     return null;
 });
@@ -275,11 +287,15 @@ const _renderColor = Behaviors.collect(null, color, (_, c) => {
 });
 // ── Portal titleBar clock sync ────────────────────────────────────────────
 const _portalClockSync = Behaviors.collect(null, Events.change(vTime), function(_, t) {
-    var _p = rootEl && rootEl.parentElement;
-    if (!_p) return null;
-    var _clk = _p.querySelector('.vm-clock');
+    // Walk up from rootEl to find nearest container with .vm-clock (titleBar stats)
+    var _p = rootEl;
+    var _clk = null;
+    while (_p && _p.parentElement && !_clk) {
+        _p = _p.parentElement;
+        _clk = _p.querySelector && _p.querySelector(':scope > * > .vm-clock, :scope > .vm-clock');
+    }
     if (_clk) _clk.textContent = t || 0;
-    var _prs = _p.querySelector('.vm-peers');
+    var _prs = _clk && _clk.parentElement && _clk.parentElement.querySelector('.vm-peers');
     if (_prs) _prs.textContent = Object.keys(objects || {}).length;
     return null;
 });
@@ -364,11 +380,15 @@ const _render = Behaviors.collect(null,
 );
 // ── Portal titleBar clock sync ────────────────────────────────────────────
 const _portalClockSync = Behaviors.collect(null, Events.change(vTime), function(_, t) {
-    var _p = rootEl && rootEl.parentElement;
-    if (!_p) return null;
-    var _clk = _p.querySelector('.vm-clock');
+    // Walk up from rootEl to find nearest container with .vm-clock (titleBar stats)
+    var _p = rootEl;
+    var _clk = null;
+    while (_p && _p.parentElement && !_clk) {
+        _p = _p.parentElement;
+        _clk = _p.querySelector && _p.querySelector(':scope > * > .vm-clock, :scope > .vm-clock');
+    }
     if (_clk) _clk.textContent = t || 0;
-    var _prs = _p.querySelector('.vm-peers');
+    var _prs = _clk && _clk.parentElement && _clk.parentElement.querySelector('.vm-peers');
     if (_prs) _prs.textContent = Object.keys(objects || {}).length;
     return null;
 });
@@ -401,7 +421,7 @@ const _portalClockSync = Behaviors.collect(null, Events.change(vTime), function(
 // Uses UNIFIED_APP for model compilation but overrides viewProgram/applyAction
 // with the full dom-demo VIEW_PROGRAM (same pattern as krestianify-demo.html).
 APPS["world"] = {
-    modelNodes: ['ticking', 'windows', 'randomResult', 'tick', 'subTick', 'counter', 'subCounter'],
+    modelNodes: ['ticking', 'windows', 'portals', 'portalLinks', 'randomResult', 'tick', 'subTick', 'counter', 'subCounter'],
     app: `
 // ── MODEL nodes: shared, deterministic, replicated ────────────────────────
 const ticking = Behaviors.collect(
@@ -413,6 +433,16 @@ const windows = Behaviors.collect(
     (_initialState && _initialState.windows) || {},
     Events.change(worldState),
     (_, s) => s ? s.windows : {}
+);
+const portals = Behaviors.collect(
+    (_initialState && _initialState.portals) || {},
+    Events.change(worldState),
+    (_, s) => s ? s.portals : {}
+);
+const portalLinks = Behaviors.collect(
+    (_initialState && _initialState.portalLinks) || {},
+    Events.change(worldState),
+    (_, s) => s ? s.portalLinks : {}
 );
 const randomResult = Behaviors.collect(
     (_initialState && _initialState.randomResult) || null,
@@ -442,6 +472,8 @@ const windows      = Behaviors.collect({},    Events.receiver(), function(_,v){r
 const randomResult = Behaviors.collect(null,  Events.receiver(), function(_,v){return v;});
 const counter      = Behaviors.collect(0,     Events.receiver(), function(_,v){return v||0;});
 const subCounter   = Behaviors.collect(0,     Events.receiver(), function(_,v){return v||0;});
+const portals      = Behaviors.collect({},    Events.receiver(), function(_,v){return v||{};});
+const portalLinks  = Behaviors.collect({},    Events.receiver(), function(_,v){return v||{};});
 const setPortal    = Events.receiver();
 // tick/subTick pushed by VM but not used directly in view — counter/subCounter carry the values
 
@@ -453,6 +485,7 @@ console.log('buildUI timer fired', { done, rootEl, vTime });
     if (done) return true;
     var rEl = rootEl;
     if (!rEl || rEl.querySelector('.vm-clock')) return true;
+
     // Inject avatar + vm CSS so blank-joiner gets styles without a <style> block
     if (UI && UI.injectStyles) UI.injectStyles();
     var strip = document.createElement('div');
@@ -544,6 +577,23 @@ const _spawnWired = Behaviors.collect(false, Events.once(vTime), function(done, 
                 rootEl: el, UI: UI,
             });
 
+            // Tag portal windows for CSS hiding of nested portals
+            if (childVM._isPortal) {
+                el.classList.add('kv-portal-window');
+                // Link windows get extra class to distinguish from auto-paired portals
+                if (childVM._linkId) el.classList.add('kv-link-window');
+                // Pre-create .vm-content so world:2 renders inside it (not directly in el).
+                // _portalLinkSync offsets .vm-content to slide the viewport.
+                // Also ensures _buildUI guard (.vm-clock found in titlebar) works correctly.
+                var _pvc = document.createElement('div');
+                _pvc.className = 'vm-content';
+                _pvc.style.cssText = 'position:absolute;top:22px;left:0;right:0;bottom:0;overflow:hidden;';
+                el.appendChild(_pvc);
+                // Point child VM rootEl at .vm-content so world:2 renders there
+                childVM.viewAppExtra = Object.assign(childVM.viewAppExtra || {}, {
+                    rootEl: _pvc, UI: UI,
+                });
+            }
             el.addEventListener('mouseenter', function() { app._activeWS = childVM.ws; });
             el.addEventListener('mousedown',  function(e) {
                 if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
@@ -672,23 +722,41 @@ const _sendMove = Behaviors.collect(null, Events.or(_mouseCoords, _clickDoc), fu
 // 'foo'     → open portal window connecting to existing selo 'foo'
 function _parsePortalInput(inputVal) {
     var v = (inputVal || '').trim();
-    if (!v) return { seloId: '', appName: null, maxDepth: null };
-    // Parse trailing options: "balls:1:d=5" → d=5 sets maxDepth
+    if (!v) return { seloId: '', appName: null, maxDepth: null, isPortal: false };
+    // Parse trailing options: ":d=5" sets maxDepth
     var maxDepth = null;
     var _dIdx = v.lastIndexOf(':d='); if (_dIdx >= 0) { var _dVal = v.slice(_dIdx + 3); if (_dVal && !isNaN(parseInt(_dVal, 10))) { maxDepth = parseInt(_dVal, 10); v = v.slice(0, _dIdx).trim(); } }
+    // "portal:p1" — create a named portal rect in this selo
+    if (v.indexOf('portal:') === 0) {
+        var _pname = v.slice(7).trim();
+        return { action: 'createPortal', portalName: _pname, maxDepth: maxDepth };
+    }
+    // "link:p1->world:2/p2" — link local portal p1 to portal p2 in world:2
+    // fromPortalName -> toSelo / toPortalName
+    if (v.indexOf('link:') === 0) {
+        var _spec = v.slice(5).trim();
+        var _arrowIdx = _spec.indexOf('->');
+        if (_arrowIdx < 0) return { seloId: v, appName: null, maxDepth: maxDepth, isPortal: false };
+        var _from = _spec.slice(0, _arrowIdx).trim();
+        var _toSpec = _spec.slice(_arrowIdx + 2).trim();
+        var _slashIdx = _toSpec.lastIndexOf('/');
+        var _toSelo = _slashIdx >= 0 ? _toSpec.slice(0, _slashIdx).trim() : _toSpec;
+        var _toPortal = _slashIdx >= 0 ? _toSpec.slice(_slashIdx + 1).trim() : '';
+        return { action: 'createLink', fromPortalName: _from, toSelo: _toSelo, toPortalName: _toPortal, maxDepth: maxDepth };
+    }
     var resolve = Renkon.app && Renkon.app.resolveApp;
     if (resolve) {
         var r = resolve(v);
         if (r && r.appDef) {
             var hasName = r.seloId && r.seloId.length > 0;
             var fullSeloId = hasName ? v : '';
-            return { seloId: fullSeloId, appName: r.appName, maxDepth: maxDepth };
+            return { seloId: fullSeloId, appName: r.appName, maxDepth: maxDepth, isPortal: false };
         }
     }
     if (v.indexOf('new:') === 0) {
-        return { seloId: v.slice(4).trim(), appName: null, maxDepth: maxDepth };
+        return { seloId: v.slice(4).trim(), appName: null, maxDepth: maxDepth, isPortal: false };
     }
-    return { seloId: v, appName: null, maxDepth: maxDepth };
+    return { seloId: v, appName: null, maxDepth: maxDepth, isPortal: false };
 }
 
 // ── portalText — synced portal input value ────────────────────────────────
@@ -736,7 +804,33 @@ const renderer = ((renderTick)=>
         onSubmit: atMax ? null : function(inputVal) {
             if (!ws || ws.readyState !== WebSocket.OPEN) return;
             var parsed = _parsePortalInput(inputVal);
-            ws.send(JSON.stringify({ type: 'spawnSelo', data: { seloId: parsed.seloId, appName: parsed.appName || null, maxDepth: parsed.maxDepth } }));
+            if (parsed.action === 'createPortal') {
+                ws.send(JSON.stringify({ type: 'createPortal', data: {
+                    name: parsed.portalName
+                }}));
+            } else if (parsed.action === 'createLink') {
+                // Resolve local portal id from name.
+                // Use Renkon.app._portalState (set by _exposePortalState) since
+                // portals behavior is not in scope inside the renderer closure.
+                var _localPortals = (Renkon.app && Renkon.app._portalState) || {};
+                var _fromPortal = null;
+                Object.values(_localPortals).forEach(function(p) {
+                    if (p.name === parsed.fromPortalName) _fromPortal = p;
+                });
+                if (_fromPortal && ws && ws.readyState === 1) {
+                    ws.send(JSON.stringify({ type: 'createLink', data: {
+                        fromPortalId:  _fromPortal.id,
+                        toSelo:        parsed.toSelo,
+                        toPortalName:  parsed.toPortalName,
+                        maxDepth:      parsed.maxDepth,
+                    }}));
+                } else if (!_fromPortal) {
+                    console.warn('[portal] local portal not found:', parsed.fromPortalName,
+                        'available:', Object.values(_localPortals).map(function(p){return p.name;}));
+                }
+            } else {
+                ws.send(JSON.stringify({ type: 'spawnSelo', data: { seloId: parsed.seloId, appName: parsed.appName || null, maxDepth: parsed.maxDepth } }));
+            }
         },
     }).bar;
 };
@@ -761,8 +855,14 @@ const renderer = ((renderTick)=>
             child.querySelector?.('.vm-clock'));
 
         var _topOff = _strip ? (_strip.offsetHeight || 22) : 0;
+        // bottom:36px reserved for portal bar — but in portal viewports the contentEl
+        // can be 400vh tall, making the layer huge and avatars render far offscreen.
+        // Use overflow:hidden on the parent to clip instead.
+        var _isPortalContent = rEl.classList && rEl.classList.contains('vm-content') &&
+            rEl.parentElement && rEl.parentElement.classList.contains('kv-portal-window');
+        var _bottom = _isPortalContent ? '0px' : '36px';
         layer.style.cssText =
-            'position:absolute;top:' + _topOff + 'px;left:0;right:0;bottom:36px;' +
+            'position:absolute;top:' + _topOff + 'px;left:0;right:0;bottom:' + _bottom + ';' +
             'pointer-events:none;overflow:hidden;';
         rEl.appendChild(layer);
     }
@@ -793,6 +893,289 @@ const renderer = ((renderTick)=>
 
     return null;
 })(renderTick);
+
+// ── _exposePortalState — share portals with parent VM ────────────────────
+const _exposePortalState = Behaviors.collect(null,
+    Events.or(Events.change(portals), Events.change(portalLinks)),
+    function(_, __) {
+        if (Renkon.app) {
+            Renkon.app._portalState       = portals      || {};
+            Renkon.app._portalLinksState  = portalLinks  || {};
+        }
+        return null;
+    }
+);
+
+// ── _portalRectSync — draggable portal viewport rectangles ────────────────
+// Each portal is a named dashed rectangle. Moving it shifts the viewport
+// in any linked selo's window. No child VMs — purely a visual anchor.
+const _portalRectSync = Behaviors.collect(null, Events.change(portals), function(_, pts) {
+    if (!rootEl) return null;
+    pts = pts || {};
+    var ws  = Renkon.app.ws;
+    var rEl = rootEl;
+
+    // Remove stale rects
+    Array.from(rEl.children).forEach(function(el) {
+        if (el.classList && el.classList.contains('kv-portal-rect') && !pts[el.dataset.portalId])
+            el.remove();
+    });
+
+    Object.keys(pts).forEach(function(pid) {
+        var p = pts[pid];
+        var rect = Array.from(rEl.children).find(function(el) {
+            return el.dataset && el.dataset.portalId === pid;
+        });
+
+        if (!rect) {
+            rect = document.createElement('div');
+            rect.className = 'kv-portal-rect';
+            rect.dataset.portalId = pid;
+            rect.style.cssText =
+                'position:absolute;box-sizing:border-box;' +
+                'border:2px dashed rgba(100,180,255,0.85);border-radius:4px;' +
+                'background:rgba(100,180,255,0.07);pointer-events:all;cursor:move;' +
+                'z-index:15;user-select:none;';
+
+            // Name label
+            var lbl = document.createElement('div');
+            lbl.className = 'kv-portal-label';
+            lbl.style.cssText =
+                'position:absolute;top:2px;left:6px;right:20px;font-size:10px;' +
+                'font-family:monospace;color:rgba(40,120,210,0.9);pointer-events:none;white-space:nowrap;overflow:hidden;';
+            lbl.textContent = '\u25c7 ' + (p.name || pid);
+            rect.appendChild(lbl);
+
+            // Close button
+            var _cb = document.createElement('button');
+            _cb.textContent = '\xd7';
+            _cb.style.cssText =
+                'position:absolute;top:1px;right:2px;width:14px;height:14px;' +
+                'border:none;background:rgba(200,80,80,0.4);color:#fff;border-radius:2px;' +
+                'font-size:11px;line-height:12px;cursor:pointer;padding:0;z-index:2;';
+            _cb.addEventListener('click', function(e) {
+                e.stopPropagation();
+                if (ws && ws.readyState === 1)
+                    ws.send(JSON.stringify({ type: 'closePortal', data: { id: pid } }));
+            });
+            rect.appendChild(_cb);
+
+            // Resize handle
+            var _rh = document.createElement('div');
+            _rh.style.cssText =
+                'position:absolute;bottom:0;right:0;width:14px;height:14px;cursor:se-resize;' +
+                'background:linear-gradient(135deg,transparent 50%,rgba(100,180,255,0.7) 50%);' +
+                'border-bottom-right-radius:3px;';
+            (function(_pid) {
+                var _sw=0,_sh=0,_sx=0,_sy=0,_rsz=false,_last=0;
+                function _mm(e) {
+                    if (!_rsz) return;
+                    var now=Date.now(); if (now-_last<50) return; _last=now;
+                    if (ws&&ws.readyState===1)
+                        ws.send(JSON.stringify({type:'resizePortal',data:{id:_pid,
+                            w:Math.round(Math.max(80,_sw+e.clientX-_sx)),
+                            h:Math.round(Math.max(60,_sh+e.clientY-_sy))}}));
+                }
+                function _mu(e) {
+                    if (!_rsz) return; _rsz=false;
+                    if (ws&&ws.readyState===1)
+                        ws.send(JSON.stringify({type:'resizePortal',data:{id:_pid,
+                            w:Math.round(Math.max(80,_sw+e.clientX-_sx)),
+                            h:Math.round(Math.max(60,_sh+e.clientY-_sy))}}));
+                    document.removeEventListener('mousemove',_mm); document.removeEventListener('mouseup',_mu);
+                }
+                _rh.addEventListener('mousedown',function(e){
+                    e.stopPropagation(); e.preventDefault(); _rsz=true;
+                    _sw=parseInt(rect.style.width)||320; _sh=parseInt(rect.style.height)||240;
+                    _sx=e.clientX; _sy=e.clientY;
+                    document.addEventListener('mousemove',_mm); document.addEventListener('mouseup',_mu);
+                });
+            })(pid);
+            rect.appendChild(_rh);
+
+            // Drag
+            (function(_pid) {
+                var _ox=0,_oy=0,_mx=0,_my=0,_drag=false,_last=0;
+                rect.addEventListener('mousedown', function(e) {
+                    if (e.target !== rect && e.target !== lbl) return;
+                    e.stopPropagation(); e.preventDefault(); _drag=true;
+                    _ox=parseInt(rect.style.left)||0; _oy=parseInt(rect.style.top)||0;
+                    _mx=e.clientX; _my=e.clientY;
+                    function _mm(e) {
+                        if (!_drag) return;
+                        var now=Date.now(); if (now-_last<50) return; _last=now;
+                        if (ws&&ws.readyState===1)
+                            ws.send(JSON.stringify({type:'movePortal',data:{id:_pid,
+                                x:Math.round(_ox+e.clientX-_mx),y:Math.round(_oy+e.clientY-_my)}}));
+                    }
+                    function _mu(e) {
+                        if (!_drag) return; _drag=false;
+                        if (ws&&ws.readyState===1)
+                            ws.send(JSON.stringify({type:'movePortal',data:{id:_pid,
+                                x:Math.round(_ox+e.clientX-_mx),y:Math.round(_oy+e.clientY-_my)}}));
+                        document.removeEventListener('mousemove',_mm); document.removeEventListener('mouseup',_mu);
+                    }
+                    document.addEventListener('mousemove',_mm); document.addEventListener('mouseup',_mu);
+                });
+            })(pid);
+
+            rEl.appendChild(rect);
+
+            // CSS: hide portal rects and link windows inside portal windows (prevents recursion)
+            if (!document.getElementById('kv-hide-portal-in-portal')) {
+                var _css = document.createElement('style');
+                _css.id = 'kv-hide-portal-in-portal';
+                _css.textContent =
+                    // Hide portal rects when viewed through any portal
+                    '.kv-portal-window .kv-portal-rect { display:none !important; }' +
+                    // When a link window is seen through another portal viewport,
+                    // hide its .vm-content (the recursive mirror) but keep the chrome.
+                    // The titlebar shows it exists; the empty body breaks the recursion.
+                    '.kv-portal-window .kv-link-window .vm-content { visibility:hidden !important; }';
+                document.head.appendChild(_css);
+            }
+        }
+
+        // Sync position/size from model
+        rect.style.left   = (p.x || 0) + 'px';
+        rect.style.top    = (p.y || 0) + 'px';
+        rect.style.width  = (p.w || 320) + 'px';
+        rect.style.height = (p.h || 240) + 'px';
+        // Update label if name changed
+        var _lbl = rect.querySelector('.kv-portal-label');
+        if (_lbl) _lbl.textContent = '\u25c7 ' + (p.name || pid);
+    });
+    return null;
+});
+
+// ── _portalLinkSync — manage link windows and apply viewport offset ────────
+// Each portalLink entry spawns a child VM window (via spawned/model).
+// This VIEW node sizes the window to match the local portal rect,
+// and offsets the inner content so toPortal's position aligns with (0,0).
+const _portalLinkSync = Behaviors.collect(null,
+    Events.or(Events.change(portalLinks), Events.change(portals), Events.change(objects), Events.change(vTime)),
+    function(_, __) {
+        var lks  = portalLinks || {};
+        var pts  = portals     || {};
+        var vm   = Renkon.app.vm;
+        var rEl  = rootEl;
+        if (!vm || !vm._children || !rEl) return null;
+
+        Object.keys(lks).forEach(function(lid) {
+            var lk = lks[lid];
+            var fromPortal = pts[lk.fromPortalId];
+            if (!fromPortal) return;
+
+            // Find child VM for this link
+            var childVM = null;
+            vm._children.forEach(function(cvm) { if (cvm._linkId === lid) childVM = cvm; });
+            if (!childVM) return;
+
+            // Find window container
+            var winEl = null;
+            Array.from(rEl.children).forEach(function(c) {
+                if (c.dataset && c.dataset.seloId === childVM._windowName) winEl = c;
+            });
+            if (!winEl) return;
+
+            // Size is set reactively from toPortal (remote p2) after we read it below.
+            // Position is independent — user moves the window freely.
+
+            // Wire close button to delete the link (once)
+            if (!winEl._linkCloseWired) {
+                winEl._linkCloseWired = true;
+                var _closeBtn = winEl.querySelector('button');
+                // Find the × close button (first button in titleBar)
+                var _titleBar = winEl.querySelector && winEl.children[0];
+                var _xBtn = _titleBar && Array.from(_titleBar.querySelectorAll('button'))
+                    .find(function(b) { return b.textContent === '\xd7'; });
+                if (_xBtn) {
+                    // Replace existing listeners by cloning
+                    var _newBtn = _xBtn.cloneNode(true);
+                    _xBtn.parentNode.replaceChild(_newBtn, _xBtn);
+                    _newBtn.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        // deleteLink: model removes spawned entry → _diffChildren
+                        // closes child VM → onClose removes window DOM
+                        var _ws = Renkon.app.ws;
+                        if (_ws && _ws.readyState === 1)
+                            _ws.send(JSON.stringify({ type: 'deleteLink', data: { id: lid } }));
+                    });
+                }
+            }
+
+            // Get .vm-content — offset it to slide world:2's content in the clipped window.
+            // el (window container) has overflow:hidden and clips the shifted content.
+            // .vm-content is position:absolute inside el — offsetting its left/top slides
+            // all of world:2's content (avatars, windows) past the clip boundary.
+            var contentEl = winEl.querySelector('.vm-content');
+            if (!contentEl) {
+                // Fallback: use el itself (should not happen with pre-created .vm-content)
+                contentEl = winEl;
+            }
+
+            // Read toPortal position from remote VM's exposed state
+            var remotePortals = (childVM.viewPS && childVM.viewPS.app &&
+                                  childVM.viewPS.app._portalState) || {};
+            var toPortal = Object.values(remotePortals).find(function(p) {
+                return p.name === lk.toPortalName;
+            });
+            // Offset: move content so toPortal's top-left aligns with window origin.
+            // toPortal moves right → offset goes more negative → content slides left.
+            var offX = toPortal ? -(toPortal.x || 0) : 0;
+            var offY = toPortal ? -(toPortal.y || 0) : 0;
+
+            // Window resize is now handled by _notifyLinkedResize future chain
+            // in world:2's model → injectModelMessage into world:1's model.
+            // No VIEW-side ws.send needed here.
+
+            // Mirror activation: check if the remote selo has a link window pointing
+            // back to our selo. If it does AND the user explicitly places portals to
+            // overlap (toPortal rect overlaps with fromPortal in viewport coords),
+            // activate mirror by showing the nested link window content.
+            // maxDepth prevents infinite recursion — mirror runs for finite depth only.
+            if (fromPortal && toPortal) {
+                var _mirrorCssId = 'kv-mirror-active-css';
+                if (!document.getElementById(_mirrorCssId)) {
+                    var _ms = document.createElement('style');
+                    _ms.id = _mirrorCssId;
+                    _ms.textContent =
+                        '.kv-portal-window .kv-link-window.kv-mirror-active .vm-content ' +
+                        '{ visibility:visible !important; }';
+                    document.head.appendChild(_ms);
+                }
+                // Overlap: toPortal rect (in world:2 coords) is within the viewport clip.
+                // The viewport shows world:2 from (toPortal.x, toPortal.y).
+                // fromPortal defines the clip size (w,h).
+                // Any portal rect in world:2 that falls within that region causes overlap.
+                // Simple heuristic: if a remote link window exists pointing to our selo,
+                // check if its fromPortal rect is within the clipped view.
+                var _remotePLinks = childVM.viewPS && childVM.viewPS.app &&
+                                    childVM.viewPS.app._portalLinksState || {};
+                var _hasReverseLink = Object.values(_remotePLinks).some(function(l) {
+                    return l.toSelo === Renkon.app.seloId;
+                });
+                // Mirror is active only if reverse link exists AND depth allows it
+                var _mirrorActive = _hasReverseLink && childVM.depth < childVM.maxDepth;
+                if (_mirrorActive) {
+                    winEl.classList.add('kv-mirror-active');
+                } else {
+                    winEl.classList.remove('kv-mirror-active');
+                }
+            }
+
+            // Apply offset — override .vm-content's default left:0, top:22px
+            contentEl.style.left   = offX + 'px';
+            contentEl.style.top    = (22 + offY) + 'px';  // preserve 22px titlebar gap
+            contentEl.style.right  = 'auto';               // remove right:0 constraint
+            contentEl.style.bottom = 'auto';               // remove bottom:0 constraint
+            contentEl.style.width  = '400vw';              // large enough to show all content
+            contentEl.style.height = '400vh';
+        });
+        return null;
+    }
+);
 
 // ── _winSync — apply window positions from model ──────────────────────────
 const _winSync = (() => 
@@ -880,6 +1263,24 @@ const _winSync = (() =>
         var _ww = msg.data && msg.data.w;
         var _wh = msg.data && msg.data.h;
         if (!_name) return state;
+        // _injected:true means this came via injectModelMessage (cross-world, no reflector).
+        // future(0) ensures deterministic ordering: all world:1 peers that received the
+        // same injected message process it at the same logical vTime step.
+        if (msg._injected) {
+            future(state.time, 0, '_applyWindowResize', { name: _name, w: _ww, h: _wh });
+            return state; // defer to future for determinism
+        }
+        var _wins = Object.assign({}, state.windows || {});
+        _wins[_name] = Object.assign({}, _wins[_name] || {}, { w: _ww, h: _wh });
+        return Object.assign({}, state, { windows: _wins });
+    }
+    // _applyWindowResize: future handler called from injected _resizeWindow.
+    // Runs at vTime+0, fully deterministic — same on all world:1 peers.
+    if (msg.type === '_applyWindowResize') {
+        var _name = msg.data && msg.data.name;
+        var _ww   = msg.data && msg.data.w;
+        var _wh   = msg.data && msg.data.h;
+        if (!_name) return state;
         var _wins = Object.assign({}, state.windows || {});
         _wins[_name] = Object.assign({}, _wins[_name] || {}, { w: _ww, h: _wh });
         return Object.assign({}, state, { windows: _wins });
@@ -903,11 +1304,382 @@ const _winSync = (() =>
         delete _wins[_name];
         return Object.assign({}, state, { spawned: _sp, windows: _wins });
     }
+    // ── Portal actions ───────────────────────────────────────────────────
+    // createPortal: create a named viewport rectangle in this selo.
+    // No links, no child VMs — just a positioned rect.
+    // { name, x, y, w, h }
+    if (msg.type === 'createPortal') {
+        var _d = msg.data || {};
+        var _name = (_d.name || '').trim();
+        if (!_name) return state;
+        // Check for duplicate name
+        var _portals = Object.assign({}, state.portals || {});
+        var _exists = Object.values(_portals).some(function(p) { return p.name === _name; });
+        if (_exists) return state;
+        var _pid = uid('p');
+        _portals[_pid] = {
+            id: _pid, name: _name,
+            x: _d.x != null ? _d.x : 60,
+            y: _d.y != null ? _d.y : 60,
+            w: _d.w != null ? _d.w : 320,
+            h: _d.h != null ? _d.h : 240,
+        };
+        return Object.assign({}, state, { portals: _portals });
+    }
+    // movePortal: { id, x, y }
+    if (msg.type === 'movePortal') {
+        var _d = msg.data || {};
+        var _portals = Object.assign({}, state.portals || {});
+        var _p = _portals[_d.id]; if (!_p) return state;
+        _portals[_d.id] = Object.assign({}, _p, { x: _d.x, y: _d.y });
+        return Object.assign({}, state, { portals: _portals });
+    }
+    // resizePortal: { id, w, h }
+    // Pure Croquet multi-world architecture — no ws.send, no reflector round-trip:
+    // Step 1: store new portal size in world:2's model (this applyAction).
+    // Step 2: use future(0) to schedule cross-world notification in world:2's causality.
+    // Step 3 (notifyLinkedWindowResize): world:2's model finds linked world:1 VM via
+    //         app.vm._children, calls vm1.injectModelMessage() directly — in-process,
+    //         deterministic (every peer running world:2 makes the same call at same vTime).
+    // Step 4 (world:1 model _resizeWindow): updates windows[name] via future(0).
+    // Step 5: world:1's _winSync VIEW applies size to all world:1 peers.
+    if (msg.type === 'resizePortal') {
+        var _d = msg.data || {};
+        var _portals = Object.assign({}, state.portals || {});
+        var _p = _portals[_d.id]; if (!_p) return state;
+        _portals[_d.id] = Object.assign({}, _p, { w: _d.w, h: _d.h });
+        // Schedule cross-world notification at vTime+0 (same logical tick, deterministic)
+        future(state.time, 0, '_notifyLinkedResize', { portalId: _d.id, w: _d.w, h: _d.h });
+        return Object.assign({}, state, { portals: _portals });
+    }
+    // _notifyLinkedResize: future handler — runs in world:2's causality at vTime+0.
+    // Finds all portal links in OTHER worlds that link TO the resized portal,
+    // and injects _resizeWindow directly into those worlds' model queues.
+    // No ws.send — pure in-process VM-to-VM model injection.
+    if (msg.type === '_notifyLinkedResize') {
+        var _d = msg.data || {};
+        var _pid = _d.portalId;
+        if (!_pid || !app.vm) return state;
+        // Find child VMs in this world's VM that ARE portal links
+        // (child VMs connected to other worlds)
+        var _children = app.vm._children || new Map();
+        _children.forEach(function(childVM) {
+            if (!childVM._isPortal || !childVM._linkId) return;
+            // This child VM is a link child connecting us to another world.
+            // BUT: we are world:2. The link in world:2 points FROM world:2 TO world:1?
+            // No — links are in world:1 (the viewer). World:2 has no links.
+            // Instead: find PARENT VM — world:1's VM that has a child VM connected here.
+            // app.vm._parent is world:1's VM if this is running in world:1's child VM.
+            // Actually this runs in world:2's model. app.vm = world:2's VM.
+            // world:2's VM._parent = world:1's VM (set in _diffChildren).
+        });
+        // Correct approach: world:2's VM._parent chain leads to world:1's VM.
+        // The parent VM has portalLinks pointing to world:2.
+        // Find parent VM and inject _resizeWindow for matching link windows.
+        var _vm2 = app.vm;
+        var _parentVM = _vm2._parent;
+        if (!_parentVM) return state; // standalone, no parent
+        // Find links in parent VM that point to this world and to _pid
+        var _parentState = _parentVM.modelPS &&
+            _parentVM._getModelNode(_parentVM.modelPS, 'worldState');
+        var _parentLinks = (_parentState && _parentState.portalLinks) || {};
+        Object.values(_parentLinks).forEach(function(lk) {
+            if (lk.toSelo !== _vm2.seloId) return;
+            // Find the toPortal name — check if it matches _pid
+            var _thisPortals = state.portals || {};
+            var _toPortal = _thisPortals[_pid];
+            if (!_toPortal || _toPortal.name !== lk.toPortalName) return;
+            // Found matching link — find window name in parent's spawned
+            var _parentSpawned = (_parentState && _parentState.spawned) || [];
+            var _entry = _parentSpawned.find(function(e) {
+                return e && e.linkId === lk.id;
+            });
+            if (!_entry) return;
+            // Inject _resizeWindow into parent VM's model — direct, no ws.send!
+            _parentVM.injectModelMessage('_resizeWindow', {
+                name: _entry.windowName,
+                w:    _d.w,
+                h:    _d.h,
+            }, _vm2.seloId);
+        });
+        return state; // no state change in world:2
+    }
+    // closePortal: { id } — remove portal and any links involving it
+    if (msg.type === 'closePortal') {
+        var _d = msg.data || {};
+        var _pid = _d.id; if (!_pid) return state;
+        var _portals = Object.assign({}, state.portals || {});
+        delete _portals[_pid];
+        // Remove links that reference this portal
+        var _links = Object.assign({}, state.portalLinks || {});
+        Object.keys(_links).forEach(function(lid) {
+            var l = _links[lid];
+            if (l.fromPortalId === _pid || l.toPortalId === _pid) delete _links[lid];
+        });
+        // Remove spawned child VMs for removed links
+        var _removedSeloIds = {};
+        Object.keys(state.portalLinks || {}).forEach(function(lid) {
+            if (!_links[lid]) _removedSeloIds[lid] = true;
+        });
+        var _spawned = (state.spawned || []).filter(function(e) {
+            return !(e && e.linkId && _removedSeloIds[e.linkId]);
+        });
+        return Object.assign({}, state, { portals: _portals, portalLinks: _links, spawned: _spawned });
+    }
+    // createLink: create a directional link from local portal to remote portal.
+    // Spawns a child VM to toSelo so we can show its content through fromPortal.
+    // { fromPortalId, fromPortalName, toSelo, toPortalName }
+    // Direction: viewing toSelo through fromPortal, offset by toPortal's position.
+    // createNamedPortal: create standalone named portal rect
+    if (msg.type === 'createNamedPortal') {
+        var _d = msg.data || {};
+        var _name = (_d.name || '').trim();
+        if (!_name) return state;
+        var _portals = Object.assign({}, state.portals || {});
+        if (Object.values(_portals).some(function(p) { return p.name === _name; })) return state;
+        var _pid = uid('p');
+        _portals[_pid] = { id: _pid, name: _name,
+            x: _d.x != null ? _d.x : 80,
+            y: _d.y != null ? _d.y : 80,
+            w: _d.w != null ? _d.w : 100,
+            h: _d.h != null ? _d.h : 100 };
+        return Object.assign({}, state, { portals: _portals });
+    }
+    if (msg.type === 'createLink') {
+        var _d = msg.data || {};
+        if (!_d.toSelo || !_d.toPortalName) return state;
+        // Resolve fromPortalId by name if __pending__ (portal was just created)
+        var _fromPortalId = _d.fromPortalId;
+        if (!_fromPortalId || _fromPortalId === '__pending__') {
+            if (!_d.fromPortalName) return state;
+            var _fp = Object.values(state.portals || {}).find(function(p) {
+                return p.name === _d.fromPortalName;
+            });
+            if (!_fp) return state; // portal not found
+            _fromPortalId = _fp.id;
+        }
+        var _links = Object.assign({}, state.portalLinks || {});
+        // Prevent duplicate links
+        var _dup = Object.values(_links).some(function(l) {
+            return l.fromPortalId === _fromPortalId && l.toSelo === _d.toSelo && l.toPortalName === _d.toPortalName;
+        });
+        if (_dup) return state;
+        var _lid = uid('link');
+        _links[_lid] = {
+            id:            _lid,
+            fromPortalId:  _fromPortalId,
+            toSelo:        _d.toSelo,
+            toPortalName:  _d.toPortalName,
+        };
+        // Spawn child VM to toSelo (tagged with linkId so _diffChildren wires it up)
+        var _windowName = uid('lw') + '-' + _d.toSelo;
+        var _spawned = (state.spawned || []).slice();
+        // maxDepth: user-provided via :d=N, or null (inherits from parent VM in _diffChildren)
+        var _linkMaxDepth = (_d.maxDepth != null) ? _d.maxDepth : null;
+        _spawned.push({ windowName: _windowName, seloId: _d.toSelo, linkId: _lid, isPortal: true, maxDepth: _linkMaxDepth });
+        return Object.assign({}, state, { portalLinks: _links, spawned: _spawned });
+    }
+    // deleteLink: { id }
+    if (msg.type === 'deleteLink') {
+        var _d = msg.data || {};
+        var _lid = _d.id; if (!_lid) return state;
+        var _links = Object.assign({}, state.portalLinks || {});
+        delete _links[_lid];
+        var _spawned = (state.spawned || []).filter(function(e) {
+            return !(e && e.linkId === _lid);
+        });
+        return Object.assign({}, state, { portalLinks: _links, spawned: _spawned });
+    }
+    // requestPairedPortal and setPairedPortal removed — replaced by explicit links.
+
 `,
     // buildUI is null — VIEW_PROGRAM's _buildUI Renkon node handles DOM setup
     buildUI: null,
 };
 
+
+// ── Wire portal-grid to use world's viewProgram/applyAction ─────────────
+// Done after APPS["world"] is defined so we can reference it.
+// The portal-grid app is the world app with a special setup routine in the VIEW.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── portal-grid ───────────────────────────────────────────────────────────
+// Two-world portal grid demo as a krestianified app.
+// Usage: open in two browser tabs:
+//   selo.html?k=portal-grid:w1  — world:1 (portals + links)
+//   selo.html?k=portal-grid:w2  — world:2 (portals + balls)
+// Or use portal-grid-demo.html which boots both side by side.
+//
+// On first join, the app detects which world it is (seloId suffix :w1 or :w2)
+// and uses future(time, 0, ...) to schedule portal/link creation deterministically.
+APPS["portal-grid"] = {
+    modelNodes: ['ticking', 'windows', 'portals', 'portalLinks',
+                 'randomResult', 'tick', 'subTick', 'counter', 'subCounter'],
+    app: `
+// ── MODEL ─────────────────────────────────────────────────────────────────
+const ticking = Behaviors.collect(
+    (_initialState && _initialState.ticking) || false,
+    Events.change(worldState), (_, s) => s ? s.ticking : false);
+const windows = Behaviors.collect(
+    (_initialState && _initialState.windows) || {},
+    Events.change(worldState), (_, s) => s ? s.windows : {});
+const portals = Behaviors.collect(
+    (_initialState && _initialState.portals) || {},
+    Events.change(worldState), (_, s) => s ? s.portals : {});
+const portalLinks = Behaviors.collect(
+    (_initialState && _initialState.portalLinks) || {},
+    Events.change(worldState), (_, s) => s ? s.portalLinks : {});
+const randomResult = Behaviors.collect(
+    (_initialState && _initialState.randomResult) || null,
+    Events.change(worldState), (_, s) => s ? s.randomResult : null);
+const tick     = Events.receiver();
+const subTick  = Events.receiver();
+const counter  = Behaviors.collect(
+    (_initialState && _initialState.counter) || 0,
+    tick, function(prev, _) { return prev + 1; });
+const subCounter = Behaviors.collect(
+    (_initialState && _initialState.subCounter) || 0,
+    subTick, function(prev, _) { return prev + 1; });
+`,
+    viewProgram: null,  // uses world viewProgram — set at runtime
+    applyAction: null,  // uses world applyAction — set at runtime
+    buildUI: null,
+};
+
+// ── portal-demo ──────────────────────────────────────────────────────────
+// Krestianified app demonstrating portals, links, and inter-selo VM access.
+// No manual applyAction — krestianify splits model/view automatically.
+//
+// The app runs in two roles detected by seloId suffix:
+//   selo.html?k=portal-demo:source  — the SOURCE world (creates portals + links)
+//   selo.html?k=portal-demo:target  — the TARGET world (receives links, balls)
+//
+// Features demonstrated:
+//   1. createNamedPortal — model-side portal objects
+//   2. createLink        — portal link between selos
+//   3. injectModelMessage via app.vm._parent — cross-world model msg (no ws.send)
+//   4. reactive resize: resizing target portal resizes link window in source
+APPS["portal-demo"] = {
+    modelNodes: ['ticking', 'windows', 'portals', 'portalLinks',
+                 'counter', 'randomResult', 'tick', 'subTick', 'subCounter', '_autoSetup'],
+    app: `
+// ── Shared model nodes (replicated) ──────────────────────────────────────
+const ticking = Behaviors.collect(
+    (_initialState && _initialState.ticking) || false,
+    Events.change(worldState), (_, s) => s ? s.ticking : false);
+
+const windows = Behaviors.collect(
+    (_initialState && _initialState.windows) || {},
+    Events.change(worldState), (_, s) => s ? s.windows : {});
+
+const portals = Behaviors.collect(
+    (_initialState && _initialState.portals) || {},
+    Events.change(worldState), (_, s) => s ? s.portals : {});
+
+const portalLinks = Behaviors.collect(
+    (_initialState && _initialState.portalLinks) || {},
+    Events.change(worldState), (_, s) => s ? s.portalLinks : {});
+
+const counter = Behaviors.collect(
+    (_initialState && _initialState.counter) || 0,
+    Events.change(worldState), (_, s) => s ? (s.counter || 0) : 0);
+
+const randomResult = Behaviors.collect(
+    (_initialState && _initialState.randomResult) || null,
+    Events.change(worldState), (_, s) => s ? s.randomResult : null);
+
+const tick    = Events.receiver();
+const subTick = Events.receiver();
+const subCounter = Behaviors.collect(
+    (_initialState && _initialState.subCounter) || 0,
+    subTick, function(prev, _) { return prev + 1; });
+
+// ── Auto-setup: runs once on first join (empty portals + empty portalLinks) ──
+// Detects role from seloId suffix. Uses future(time,0) for deterministic init.
+const _autoSetup = Behaviors.collect(false, Events.once(worldState), function(done, ws) {
+    if (done) return true;
+    // Only first peer (no portals yet) triggers setup
+    if (!ws || Object.keys(ws.portals || {}).length > 0) return true;
+    var _sid = (app && app.vm.seloId) || '';
+    // Source world: create 1 portal rect + 1 link to target
+    if (_sid.indexOf('source') >= 0) {
+        future(ws.time, 0, 'createNamedPortal', { name: 'src-view', x: 60, y: 60, w: 240, h: 180 });
+        future(ws.time, 10, 'createLink', {
+            fromPortalId: '__pending__',  // resolved in createLink handler
+            fromPortalName: 'src-view',
+            toSelo: _sid.replace('source', 'target'),
+            toPortalName: 'tgt-anchor',
+        });
+    }
+    // Target world: create anchor portal + spawn balls
+    if (_sid.indexOf('target') >= 0) {
+        future(ws.time, 0, 'createNamedPortal', { name: 'tgt-anchor', x: 80, y: 80, w: 240, h: 180 });
+        future(ws.time, 10, 'spawnSelo', { seloId: 'demo-balls', appName: 'balls' });
+    }
+    return true;
+});
+
+// ── Tick / counter ─────────────────────────────────────────────────────────
+const _tickNode = Behaviors.collect(0, tick, function(prev, _) { return prev + 1; });
+
+// ── VIEW nodes (local per-client) ──────────────────────────────────────────
+
+// Display counter from model
+const _counterDisplay = Behaviors.collect(null, Events.change(counter), function(_, n) {
+    var el = rootEl && rootEl.querySelector('.pd-counter');
+    if (el) el.textContent = 'tick: ' + n;
+    return null;
+});
+
+// Show seloId as title
+const _titleSync = Behaviors.collect(false, Events.timer(200), function(done, _) {
+    if (done) return true;
+    var el = rootEl && rootEl.querySelector('.pd-title');
+    if (!el) return false;
+    el.textContent = Renkon.app.seloId || '';
+    return true;
+});
+
+` + PORTAL_CLOCK_SYNC + `
+`,
+    buildUI: function(rootEl, label) {
+        var mount = rootEl;
+        if (rootEl && rootEl.querySelector && rootEl.querySelector('.vm-label')) {
+            var c = rootEl.querySelector('.vm-content');
+            if (!c) { c = document.createElement('div'); c.className = 'vm-content';
+                c.style.cssText = 'position:absolute;top:22px;left:0;right:0;bottom:0;overflow:hidden;';
+                rootEl.appendChild(c); }
+            mount = c;
+        }
+        mount.innerHTML =
+            '<div class="pd-title" style="position:absolute;top:8px;left:10px;' +
+            'font-size:11px;font-family:monospace;color:#446;font-weight:bold;"></div>' +
+            '<div class="pd-counter" style="position:absolute;top:28px;left:10px;' +
+            'font-size:11px;font-family:monospace;color:#889;">tick: 0</div>' +
+            '<div style="position:absolute;bottom:40px;left:10px;right:10px;' +
+            'font-size:10px;font-family:monospace;color:#aaa;line-height:1.6;">' +
+            'portal-demo app<br>' +
+            'portals + links + inter-selo vm inject<br>' +
+            'resizing target portal resizes source window' +
+            '</div>';
+        return mount;
+    },
+};
+
+// Wire portal-grid and portal-demo to world's programs
+if (APPS['world']) {
+    if (APPS['portal-grid']) {
+        APPS['portal-grid'].viewProgram = APPS['world'].viewProgram;
+        APPS['portal-grid'].applyAction = APPS['world'].applyAction;
+    }
+    if (APPS['portal-demo']) {
+        // portal-demo uses world's viewProgram (portals, links, avatars, windows)
+        // and world's applyAction (handles createNamedPortal, createLink, resizePortal etc.)
+        // The app's own unified program provides the model nodes krestianify uses.
+        APPS['portal-demo'].viewProgram = APPS['world'].viewProgram;
+        APPS['portal-demo'].applyAction = APPS['world'].applyAction;
+    }
+}
 
 // ── installDOMHandlers ────────────────────────────────────────────────────
 // Sets viewAppExtra on a VM before boot. Replaces the dom-demo.js version.
