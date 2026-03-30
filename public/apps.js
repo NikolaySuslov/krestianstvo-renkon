@@ -45,7 +45,7 @@ export function portalMount(rootEl) {
         if (!c) {
             c = document.createElement('div');
             c.className = 'vm-content';
-            c.style.cssText = 'position:absolute;top:22px;left:0;right:0;bottom:0;overflow:hidden;';
+            c.style.cssText = 'position:absolute;top:30px;left:0;right:0;bottom:0;overflow:hidden;';
             rootEl.appendChild(c);
         }
         return c;
@@ -173,7 +173,7 @@ const _portalClockSync = Behaviors.collect(null, Events.change(vTime), function(
         if (rootEl && rootEl.querySelector && rootEl.querySelector('.vm-label')) {
             var c = rootEl.querySelector('.vm-content');
             if (!c) { c = document.createElement('div'); c.className = 'vm-content';
-                c.style.cssText = 'position:absolute;top:22px;left:0;right:0;bottom:0;overflow:hidden;';
+                c.style.cssText = 'position:absolute;top:30px;left:0;right:0;bottom:0;overflow:hidden;';
                 rootEl.appendChild(c); }
             mount = c;
         }
@@ -232,7 +232,7 @@ const _portalClockSync = Behaviors.collect(null, Events.change(vTime), function(
         if (rootEl && rootEl.querySelector && rootEl.querySelector('.vm-label')) {
             var c = rootEl.querySelector('.vm-content');
             if (!c) { c = document.createElement('div'); c.className = 'vm-content';
-                c.style.cssText = 'position:absolute;top:22px;left:0;right:0;bottom:0;overflow:hidden;';
+                c.style.cssText = 'position:absolute;top:30px;left:0;right:0;bottom:0;overflow:hidden;';
                 rootEl.appendChild(c); }
             mount = c;
         }
@@ -305,7 +305,7 @@ const _portalClockSync = Behaviors.collect(null, Events.change(vTime), function(
         if (rootEl && rootEl.querySelector && rootEl.querySelector('.vm-label')) {
             var c = rootEl.querySelector('.vm-content');
             if (!c) { c = document.createElement('div'); c.className = 'vm-content';
-                c.style.cssText = 'position:absolute;top:22px;left:0;right:0;bottom:0;overflow:hidden;';
+                c.style.cssText = 'position:absolute;top:30px;left:0;right:0;bottom:0;overflow:hidden;';
                 rootEl.appendChild(c); }
             mount = c;
         }
@@ -398,7 +398,7 @@ const _portalClockSync = Behaviors.collect(null, Events.change(vTime), function(
         if (rootEl && rootEl.querySelector && rootEl.querySelector('.vm-label')) {
             var c = rootEl.querySelector('.vm-content');
             if (!c) { c = document.createElement('div'); c.className = 'vm-content';
-                c.style.cssText = 'position:absolute;top:22px;left:0;right:0;bottom:0;overflow:hidden;';
+                c.style.cssText = 'position:absolute;top:30px;left:0;right:0;bottom:0;overflow:hidden;';
                 rootEl.appendChild(c); }
             mount = c;
         }
@@ -587,7 +587,7 @@ const _spawnWired = Behaviors.collect(false, Events.once(vTime), function(done, 
                 // Also ensures _buildUI guard (.vm-clock found in titlebar) works correctly.
                 var _pvc = document.createElement('div');
                 _pvc.className = 'vm-content';
-                _pvc.style.cssText = 'position:absolute;top:22px;left:0;right:0;bottom:0;overflow:hidden;';
+                _pvc.style.cssText = 'position:absolute;top:30px;left:0;right:0;bottom:0;overflow:hidden;';
                 el.appendChild(_pvc);
                 // Point child VM rootEl at .vm-content so world:2 renders there
                 childVM.viewAppExtra = Object.assign(childVM.viewAppExtra || {}, {
@@ -860,7 +860,7 @@ const renderer = ((renderTick)=>
         // Use overflow:hidden on the parent to clip instead.
         var _isPortalContent = rEl.classList && rEl.classList.contains('vm-content') &&
             rEl.parentElement && rEl.parentElement.classList.contains('kv-portal-window');
-        var _bottom = _isPortalContent ? '0px' : '36px';
+        var _bottom = _isPortalContent ? '0px' : '44px'; // portal bar ~40px
         layer.style.cssText =
             'position:absolute;top:' + _topOff + 'px;left:0;right:0;bottom:' + _bottom + ';' +
             'pointer-events:none;overflow:hidden;';

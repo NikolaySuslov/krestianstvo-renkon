@@ -104,11 +104,11 @@ const KrestianstvoUI = (() => {
     function createTitleBar(name) {
         const bar = document.createElement('div');
         bar.style.cssText =
-            'position:absolute;top:0;left:0;right:0;height:22px;' +
+            'position:absolute;top:0;left:0;right:0;height:30px;' +
             'background:' + C.titleBg + ';border-bottom:1px solid ' + C.titleBorder + ';' +
             'display:flex;align-items:center;padding:0 4px;gap:4px;' +
             'font-size:11px;font-weight:bold;color:' + C.titleText + ';' +
-            'z-index:10;cursor:move;user-select:none;';
+            'z-index:10;cursor:move;user-select:none;touch-action:none;';
         const label = document.createElement('span');
         label.className = 'vm-label';
         label.textContent = name;
@@ -131,6 +131,7 @@ const KrestianstvoUI = (() => {
         el.style.cssText =
             'position:absolute;left:20px;top:40px;' +
             'width:' + CHILD_W + 'px;height:' + CHILD_H + 'px;' +
+            'min-width:120px;min-height:60px;' +
             'background:rgba(255,255,255,0.40);' +
             'border:1.5px solid ' + C.border + ';' +
             'border-radius:6px;overflow:hidden;cursor:crosshair;' +
@@ -141,9 +142,10 @@ const KrestianstvoUI = (() => {
         const closeBtn = document.createElement('button');
         closeBtn.textContent = '×';
         closeBtn.style.cssText =
-            'margin-left:4px;padding:0 5px;height:16px;line-height:14px;' +
+            'margin-left:4px;padding:0 8px;height:24px;line-height:22px;min-width:28px;' +
             'background:' + C.closeBg + ';color:' + C.closeText + ';' +
-            'border:1px solid #eaa;border-radius:3px;font-size:13px;cursor:pointer;flex:0 0 auto;';
+            'border:1px solid #eaa;border-radius:4px;font-size:15px;cursor:pointer;' +
+            'flex:0 0 auto;touch-action:manipulation;';
         closeBtn.addEventListener('mousedown', e => e.stopPropagation());
         closeBtn.addEventListener('click', e => {
             e.stopPropagation();
@@ -156,16 +158,21 @@ const KrestianstvoUI = (() => {
         const cinp = document.createElement('input');
         cinp.value = name;
         cinp.style.cssText =
-            'width:58px;padding:1px 3px;background:' + C.inputBg + ';color:#333;' +
-            'border:1px solid ' + C.inputBorder + ';border-radius:3px;font-size:10px;font-family:monospace;flex:0 0 auto;';
+            'width:72px;padding:2px 5px;background:' + C.inputBg + ';color:#333;' +
+            'border:1px solid ' + C.inputBorder + ';border-radius:4px;' +
+            'font-size:16px;font-family:monospace;flex:0 0 auto;' +
+            'touch-action:manipulation;-webkit-user-select:text;user-select:text;' +
+            'min-height:24px;box-sizing:border-box;';
         cinp.addEventListener('mousedown', e => e.stopPropagation());
         cinp.addEventListener('keydown',   e => e.stopPropagation());
 
         const cbtn = document.createElement('button');
         cbtn.textContent = 'Join';
         cbtn.style.cssText =
-            'padding:1px 5px;background:' + C.btnBg + ';color:' + C.btnText + ';' +
-            'border:1px solid ' + C.btnBorder + ';border-radius:3px;font-size:10px;cursor:pointer;flex:0 0 auto;';
+            'padding:2px 8px;background:' + C.btnBg + ';color:' + C.btnText + ';' +
+            'border:1px solid ' + C.btnBorder + ';border-radius:4px;' +
+            'font-size:13px;cursor:pointer;flex:0 0 auto;' +
+            'min-height:24px;touch-action:manipulation;';
         cbtn.addEventListener('mousedown', e => e.stopPropagation());
 
         titleBar.appendChild(cinp);
@@ -179,8 +186,8 @@ const KrestianstvoUI = (() => {
         // ── Resize handle — bottom-right corner ───────────────────────────
         const resizeHandle = document.createElement('div');
         resizeHandle.style.cssText =
-            'position:absolute;bottom:0;right:0;width:14px;height:14px;cursor:se-resize;' +
-            'z-index:30;opacity:0.4;' +
+            'position:absolute;bottom:0;right:0;width:22px;height:22px;cursor:se-resize;' +
+            'z-index:30;opacity:0.4;touch-action:none;' +
             'background:linear-gradient(135deg,transparent 50%,' + C.border + ' 50%);' +
             'border-bottom-right-radius:5px;';
         function _startResize(startX, startY) {
@@ -236,8 +243,8 @@ const KrestianstvoUI = (() => {
         const rotateHandle = document.createElement('div');
         rotateHandle.title = 'Rotate';
         rotateHandle.style.cssText =
-            'position:absolute;bottom:0;left:0;width:14px;height:14px;cursor:crosshair;' +
-            'z-index:30;opacity:0.4;' +
+            'position:absolute;bottom:0;left:0;width:22px;height:22px;cursor:crosshair;' +
+            'z-index:30;opacity:0.4;touch-action:none;' +
             'background:linear-gradient(225deg,transparent 50%,' + C.border + ' 50%);' +
             'border-bottom-left-radius:5px;';
         (function() {
@@ -303,7 +310,7 @@ const KrestianstvoUI = (() => {
         bar = document.createElement('div');
         bar.className = 'vm-portal-bar';
         bar.style.cssText =
-            'position:absolute;bottom:0;left:0;right:0;display:flex;gap:4px;padding:5px 8px;' +
+            'position:absolute;bottom:0;left:0;right:0;display:flex;gap:6px;padding:6px 8px;' +
             'background:' + C.portalBg + ';border-top:1px solid ' + C.titleBorder + ';' +
             'z-index:20;box-sizing:border-box;';
 
@@ -312,15 +319,17 @@ const KrestianstvoUI = (() => {
         inp.disabled = disabled;
         inp.style.cssText =
             'flex:1;min-width:0;padding:3px 7px;border:1px solid ' + C.titleBorder + ';border-radius:3px;' +
-            'font-size:11px;font-family:monospace;background:' + (disabled ? '#eee' : '#fff') + ';color:#334;';
+            'font-size:16px;font-family:monospace;background:' + (disabled ? '#eee' : '#fff') + ';color:#334;' +
+            'touch-action:manipulation;-webkit-user-select:text;user-select:text;';
 
         const btn = document.createElement('button');
         btn.textContent = 'Open';
         btn.disabled = disabled;
         btn.style.cssText =
             'padding:3px 10px;background:' + (disabled ? '#ddd' : C.btnBg) + ';color:' + C.btnText + ';' +
-            'border:1px solid ' + C.btnBorder + ';border-radius:3px;font-size:11px;' +
-            'cursor:' + (disabled ? 'default' : 'pointer') + ';white-space:nowrap;';
+            'border:1px solid ' + C.btnBorder + ';border-radius:4px;font-size:14px;' +
+            'cursor:' + (disabled ? 'default' : 'pointer') + ';white-space:nowrap;' +
+            'touch-action:manipulation;min-height:28px;';
 
         bar.appendChild(inp);
         bar.appendChild(btn);
