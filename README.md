@@ -60,6 +60,7 @@ This gives **sub-tick ordering** — multiple messages at the same virtual time 
 
 - [Krestianstvo VM](/doc/krestianstvo-vm.md)
 - [Krestianify compiler](/doc/krestianify.md)
+- [Portals](/doc/portals.md)
 - [Using as ES6 module](/doc/es6-module.md)
 - [Demos explained](/doc/demos.md)
 
