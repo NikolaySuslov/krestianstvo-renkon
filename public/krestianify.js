@@ -98,7 +98,7 @@ function _kfy_probeDecls(userCode) {
         allDecls.push({ name: name, code: d.code });
         // Infer type from source: does this node use Events.* ?
         var isEvent = /\bEvents\.(next|listener|or|change|receiver)\b/.test(d.code)
-                   && !/\bBehaviors\.collect\b/.test(d.code);
+                   && !/\bBehaviors\.(collect|select)\b/.test(d.code);
         types.set(name, isEvent ? 'Event' : 'Behavior');
     });
 
@@ -167,6 +167,10 @@ var _KFY_VIEW_PREAMBLE_NAMES = new Set([
     'clientIdentity', 'myObject',                    // view-only, per-client identity
     '_kfy_send', 'Renkon', 'rootEl', 'UI', 'vm',     // view utilities
     'uid', 'random', 'now', 'future',                  // model builtins — available everywhere
+    // Portal helper functions — available in every model program (model preamble)
+    'portal_create', 'portal_update', 'portal_delete',
+    'portal_link', 'portal_unlink', 'selo_spawn', 'inject',
+    'injectModelMessage', 'seloId',                   // also model preamble constants
 ]);
 
 function krestianify(userCode, modelNodes) {
@@ -298,7 +302,8 @@ function krestianify(userCode, modelNodes) {
     var modelNodeStr = modelDecls.map(function(d) {
         if (d.type === 'Event') return d.code;
         var code = d.code;
-        var match = code.match(/Behaviors\.collect\s*\(/);
+        // Handle both Behaviors.collect and Behaviors.select — both take init as first arg
+        var match = code.match(/Behaviors\.(collect|select)\s*\(/);
         if (!match) return code;
         var start = match.index + match[0].length;
         var depth = 0;

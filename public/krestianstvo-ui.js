@@ -32,10 +32,7 @@ const KrestianstvoUI = (() => {
         const s = document.createElement('style');
         s.textContent = `
 .vm-root { position:absolute; inset:0; background:#f5f5f8; overflow:hidden; cursor:crosshair; outline:none; font-family:monospace; touch-action:none; }
-.avatar { position:absolute; width:36px; height:36px; border-radius:50%; border:3px solid #8899bb; background:rgba(255,255,255,0.70);
-    display:flex; align-items:center; justify-content:center;
-    font-size:9px; font-weight:bold; color:#334; text-align:center; line-height:1.1;
-    pointer-events:none; }
+.avatar { position:absolute; pointer-events:none; }
 .vm-portal-bar { padding-bottom: max(5px, env(safe-area-inset-bottom)) !important; }
 `;
         document.head.appendChild(s);
@@ -113,11 +110,7 @@ const KrestianstvoUI = (() => {
         label.className = 'vm-label';
         label.textContent = name;
         label.style.cssText = 'flex:0 0 auto;max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-        const stats = document.createElement('span');
-        stats.style.cssText = 'margin-left:auto;font-size:10px;font-weight:normal;color:' + C.statsText + ';white-space:nowrap;';
-        stats.innerHTML = 'T:<span class="vm-clock">0</span> P:<span class="vm-peers">0</span> <span class="vm-queue"></span>';
         bar.appendChild(label);
-        bar.appendChild(stats);
         return bar;
     }
 
@@ -165,6 +158,20 @@ const KrestianstvoUI = (() => {
             'min-height:24px;box-sizing:border-box;';
         cinp.addEventListener('mousedown', e => e.stopPropagation());
         cinp.addEventListener('keydown',   e => e.stopPropagation());
+        // iOS fix: when input is focused the visual viewport shrinks, which can
+        // cause the absolutely-positioned window to appear to resize. Lock the
+        // window's explicit width/height on focus so it stays put, and restore
+        // on blur. This prevents the "resize to input field size" bug on iPad.
+        cinp.addEventListener('focus', () => {
+            el._lockedW = el.offsetWidth;
+            el._lockedH = el.offsetHeight;
+            el.style.width  = el._lockedW + 'px';
+            el.style.height = el._lockedH + 'px';
+        });
+        cinp.addEventListener('blur', () => {
+            el._lockedW = null;
+            el._lockedH = null;
+        });
 
         const cbtn = document.createElement('button');
         cbtn.textContent = 'Join';
@@ -186,8 +193,8 @@ const KrestianstvoUI = (() => {
         // ── Resize handle — bottom-right corner ───────────────────────────
         const resizeHandle = document.createElement('div');
         resizeHandle.style.cssText =
-            'position:absolute;bottom:0;right:0;width:22px;height:22px;cursor:se-resize;' +
-            'z-index:30;opacity:0.4;touch-action:none;' +
+            'position:absolute;bottom:0;right:0;width:14px;height:14px;cursor:se-resize;' +
+            'z-index:30;opacity:0.4;' +
             'background:linear-gradient(135deg,transparent 50%,' + C.border + ' 50%);' +
             'border-bottom-right-radius:5px;';
         function _startResize(startX, startY) {
@@ -321,6 +328,24 @@ const KrestianstvoUI = (() => {
             'flex:1;min-width:0;padding:3px 7px;border:1px solid ' + C.titleBorder + ';border-radius:3px;' +
             'font-size:16px;font-family:monospace;background:' + (disabled ? '#eee' : '#fff') + ';color:#334;' +
             'touch-action:manipulation;-webkit-user-select:text;user-select:text;';
+        // iOS fix: lock rootEl dimensions during input focus to prevent
+        // visual-viewport shrink from resizing the portal window container.
+        // if (!disabled) {
+        //     inp.addEventListener('focus', () => {
+        //         if (rootEl && rootEl.style) {
+        //             rootEl._barFocusW = rootEl.offsetWidth;
+        //             rootEl._barFocusH = rootEl.offsetHeight;
+        //             rootEl.style.width  = rootEl._barFocusW + 'px';
+        //             rootEl.style.height = rootEl._barFocusH + 'px';
+        //         }
+        //     });
+        //     inp.addEventListener('blur', () => {
+        //         if (rootEl && rootEl._barFocusW) {
+        //             rootEl._barFocusW = null;
+        //             rootEl._barFocusH = null;
+        //         }
+        //     });
+        // }
 
         const btn = document.createElement('button');
         btn.textContent = 'Open';

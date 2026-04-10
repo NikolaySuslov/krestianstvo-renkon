@@ -47,8 +47,10 @@ const seloId   = params.seloId;   // full rawKey e.g. "color:1" or "1"
 const wsUrl    = params.reflector;
 
 // ?app= query param takes priority; otherwise use appName from "appName:seloId" in ?k=
+// Default to 'world' so ?k=a behaves like ?k=world:a for fresh sessions.
+// Joiners of existing sessions are unaffected — snapshot programs overwrite on restore.
 const urlParams = new URLSearchParams(window.location.search);
-const appName   = urlParams.get('app') || params.appName || null;
+const appName   = urlParams.get('app') || params.appName || 'world';
 const appDef    = appName ? (resolveApp(appName + ':') || {}).appDef : null;
 
 const statusEl  = document.getElementById('status');
@@ -57,9 +59,7 @@ const rootEl    = document.getElementById('root');
 function setStatus(msg) { if (statusEl) statusEl.textContent = msg; }
 function hideStatus()   { if (statusEl) statusEl.style.display = 'none'; }
 
-setStatus(appDef
-    ? 'Starting ' + appName + ' in selo ' + seloId + '…'
-    : 'Joining selo ' + seloId + '…');
+setStatus('Joining selo ' + seloId + (params.appName ? '' : ' [world]') + '…');
 
 const vm = new KrestianstvoVM({ seloId, wsUrl, maxDepth: params.maxDepth });
 

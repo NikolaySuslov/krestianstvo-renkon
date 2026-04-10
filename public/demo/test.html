@@ -132,8 +132,8 @@ import { MODEL_PROGRAM, VIEW_PROGRAM, APPLY_ACTION } from './tests.js';
         uiLog('--- TEST 4: peer tracking ---', 'inf');
         const wsA = getWorldState(vmA, 'objects');
         const wsB = getWorldState(vmB, 'objects');
-        const keysA = Object.keys(wsA || {});
-        const keysB = Object.keys(wsB || {});
+        const keysA = wsA instanceof Map ? [...wsA.keys()] : Object.keys(wsA || {});
+        const keysB = wsB instanceof Map ? [...wsB.keys()] : Object.keys(wsB || {});
         uiLog('vmA peers: ' + keysA.join(', '), 'inf');
         uiLog('vmB peers: ' + keysB.join(', '), 'inf');
         assert('both peers see 2 peers', keysA.length === 2 && keysB.length === 2,
