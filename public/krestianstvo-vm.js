@@ -85,14 +85,23 @@ const _vm_enqueue = (state, ev) => {
         return next;
     }
     if (ev.type === 'disconnect') {
-        const objs = new Map(state.objects);
-        objs.delete(ev.from);
-        const next = { ...state, objects: objs };
+        const peers = new Map(state._peers || new Map());
+        peers.delete(ev.from);
+        const next = { ...state, _peers: peers };
         if (app.viewPS) {
-            app.viewPS.registerEvent('objects', objs);
-            const _clients = [...objs.keys()].sort();
-            app.viewPS.registerEvent('clients', _clients);
+            // Immediately remove from app-level avatar Map so renderer doesn't
+            // re-create the ghost between _avatarLeftSync and the _makeSend post-loop.
+            var _on = (app._ps && app._ps.resolved && app._ps.resolved.get('objects'))
+                   || (app._ps && app._ps.scratch  && app._ps.scratch.get('objects'));
+            var _ov = _on && _on.value;
+            if (_ov && _ov.map instanceof Map) {
+                _ov.map.delete(ev.from);
+                app.viewPS.registerEvent('objects', { map: _ov.map });
+                if (app._modelStatePrev) app._modelStatePrev['objects'] = { map: _ov.map };
+            }
             app.viewPS.registerEvent('clientLeft', [ev.from]);
+            const _clients = [...peers.keys()].sort();
+            app.viewPS.registerEvent('clients', _clients);
         }
         return next;
     }
@@ -125,34 +134,27 @@ const _vm_drain = (s) => {
             ? { ...msg.data, from: msg.from }
             : { value: msg.data, from: msg.from };
         // Feed the model PS receiver for this message so FRP nodes fire.
-        // viewToModel types (incr/decr) are handled by _makeSend 3rd-step instead —
+        // viewToModel types (view-triggered) are handled by _makeSend 3rd-step instead —
         // they must not be double-registered here or they'd fire twice.
-        if (!(app.viewEchoExclude && app.viewEchoExclude.has(msg.type))) {
+        // Exception: future-scheduled messages (_future=true) always register directly —
+        // they have a direct type (not wrapped in client_msg) and may target FRP receivers
+        // that are in viewToModel (e.g. createNamedPortal, createLink, spawnSelo).
+        if (msg._future || !(app.viewEchoExclude && app.viewEchoExclude.has(msg.type))) {
             // Deliver { ...data, from } to model receivers — same shape as view val
             // so model Behaviors can read ev.from (e.g. _move needs msg.from for avatar id)
             app._ps.registerEvent(msg.type, val);
         }
-        // Notify meta PS if spawned list changed
-        if (app.metaPS && next.spawned !== s.spawned) {
-            //console.log('[_makeSend] spawned changed:', s.spawned, '->', next.spawned);
-            app.metaPS.registerEvent('_spawned', next.spawned.slice());
-        }
         if (app.viewPS && msg.type !== 'spawnSelo') {
-            if (!app.viewEchoExclude || !app.viewEchoExclude.has(msg.type))
+            if (msg._future || !app.viewEchoExclude || !app.viewEchoExclude.has(msg.type))
                 app.viewPS.registerEvent(msg.type, val);
-            // Push objects + vTime directly from worldState — always current after drain
-            if (next.objects !== s.objects) app.viewPS.registerEvent('objects', next.objects);
-            if (next.objects !== s.objects) {
-                var _nextClients = [...(next.objects || new Map()).keys()].sort();
-                var _prevClients = [...(s.objects || new Map()).keys()].sort();
+            if (next._peers !== s._peers) {
+                var _nextClients = [...(next._peers || new Map()).keys()].sort();
+                var _prevClients = [...(s._peers    || new Map()).keys()].sort();
                 app.viewPS.registerEvent('clients',      _nextClients);
                 app.viewPS.registerEvent('clientJoined', _nextClients.filter(function(id) { return _prevClients.indexOf(id) === -1; }));
                 app.viewPS.registerEvent('clientLeft',   _prevClients.filter(function(id) { return _nextClients.indexOf(id) === -1; }));
             }
-            if (next.time   !== s.time)    app.viewPS.registerEvent('vTime',   next.time);
-            // modelStateKeys are pushed to viewPS in _makeSend after FRP propagation —
-            // not here in drain, to avoid pushing stale PS node initial values (e.g. counter=0)
-            // over correct snapshot-restored values.
+            if (next.time !== s.time) app.viewPS.registerEvent('vTime', next.time);
         }
     }
     return _vm_drain(next);
@@ -161,19 +163,16 @@ const _vm_drain = (s) => {
 const _vm_applyAction_builtin = (state, msg) => {
     if (!msg) return state;
     if (msg.type === '_join') {
-        if (state.objects.get(msg.from)) return state;
+        const peers = new Map(state._peers || new Map());
+        if (peers.get(msg.from)) return state;
         console.log('[_join] peer joined:', msg.from);
-        // Assign deterministic color from shared random() — same result on all peers
-        const _palette = ['#e05555','#0077cc','#0a9960','#f87800','#8833ee','#009bbb','#cc4400','#558800','#b05090','#207070'];
-        const _color = _palette[Math.floor(random() * _palette.length)];
-        const objs = new Map(state.objects);
-        objs.set(msg.from, { joinedAt: state.time, color: _color, x: 80, y: 80 });
-        return { ...state, objects: objs };
+        peers.set(msg.from, { joinedAt: state.time });
+        return { ...state, _peers: peers };
     }
     if (msg.type === '_leave') {
-        const objs = new Map(state.objects);
-        objs.delete(msg.from);
-        return { ...state, objects: objs };
+        const peers = new Map(state._peers || new Map());
+        peers.delete(msg.from);
+        return { ...state, _peers: peers };
     }
 };
 
@@ -187,145 +186,68 @@ const _vm_applyAction_builtin = (state, msg) => {
 const _vm_applyAction_portal = (state, msg) => {
     if (!msg) return state;
 
-    // ── Portal anchors ─────────────────────────────────────────────────
-    // createPortal: create a named anchor in this world's model.
-    // meta: any app-defined data (position, size, color, index, etc.)
-    // { name, ...meta }
-    if (msg.type === 'createPortal') {
-        var _d = msg.data || {};
-        var _name = (_d.name || '').trim();
-        if (!_name) return state;
-        var _portals = new Map(state.portals || new Map());
-        if ([..._portals.values()].some(function(p) { return p.name === _name; })) return state;
-        var _pid = uid('portal');
-        var _meta = Object.assign({}, _d);
-        delete _meta.name;
-        _portals.set(_pid, { id: _pid, name: _name, meta: _meta });
-        return Object.assign({}, state, { portals: _portals });
-    }
-    // updatePortal: update a portal's meta (app-defined payload).
+    // updatePortal: update a portal's meta (app-defined payload). Reads from FRP
+    // portals node if available (krestianified apps), falls back to worldState.portals.
+    // Schedules _notifyPortalUpdate future to propagate to parent VMs.
     // { id, ...meta }  OR  { name, ...meta }
     if (msg.type === 'updatePortal') {
         var _d = msg.data || {};
-        var _portals = new Map(state.portals || new Map());
-        var _pid = _d.id || ([..._portals.values()].find(function(p) { return p.name === _d.name; }) || {}).id;
-        if (!_pid || !_portals.get(_pid)) return state;
-        var _meta = Object.assign({}, _portals.get(_pid).meta || {}, _d);
+        // Read portals from FRP node (krestianified) or worldState (legacy)
+        var _pn = app._ps && ((app._ps.resolved && app._ps.resolved.get('portals'))
+                           || (app._ps.scratch  && app._ps.scratch.get('portals')));
+        var _pv = _pn && _pn.value;
+        var _portalsMap = (_pv && _pv.map instanceof Map) ? _pv.map : new Map();
+        var _pid = _d.id || ([..._portalsMap.values()].find(function(p) { return p.name === _d.name; }) || {}).id;
+        if (!_pid || !_portalsMap.get(_pid)) return state;
+        var _meta = Object.assign({}, _portalsMap.get(_pid).meta || {}, _d);
         delete _meta.id; delete _meta.name;
-        _portals.set(_pid, Object.assign({}, _portals.get(_pid), { meta: _meta }));
-        // Notify linked parent VMs via future — same cross-world pattern
+        _portalsMap.set(_pid, Object.assign({}, _portalsMap.get(_pid), { meta: _meta }));
         future(state.time, 0, '_notifyPortalUpdate', { portalId: _pid });
-        return Object.assign({}, state, { portals: _portals });
-    }
-    // deletePortal: remove portal and all links involving it.
-    // { id }  OR  { name }
-    if (msg.type === 'deletePortal') {
-        var _d = msg.data || {};
-        var _portals = new Map(state.portals || new Map());
-        var _pid = _d.id || ([..._portals.values()].find(function(p) { return p.name === _d.name; }) || {}).id;
-        if (!_pid) return state;
-        _portals.delete(_pid);
-        var _links = new Map(state.portalLinks || new Map());
-        var _removedLinks = {};
-        _links.forEach(function(lk, lid) {
-            if (lk.fromPortalId === _pid) { _removedLinks[lid] = true; _links.delete(lid); }
-        });
-        var _spawned = (state.spawned || []).filter(function(e) { return !(e && e.linkId && _removedLinks[e.linkId]); });
-        return Object.assign({}, state, { portals: _portals, portalLinks: _links, spawned: _spawned });
-    }
-
-    // ── Portal links ───────────────────────────────────────────────────
-    // createLink: link fromPortal in this world to toPortalName in toSelo.
-    // Spawns a child VM to toSelo. maxDepth controls recursion depth.
-    // fromPortalId '__pending__' is resolved by fromPortalName.
-    // { fromPortalId, fromPortalName, toSelo, toPortalName, maxDepth }
-    if (msg.type === 'createLink') {
-        var _d = msg.data || {};
-        if (!_d.toSelo || !_d.toPortalName) return state;
-        var _fromId = _d.fromPortalId;
-        if (!_fromId || _fromId === '__pending__') {
-            if (!_d.fromPortalName) return state;
-            var _fp = [...(state.portals || new Map()).values()].find(function(p) { return p.name === _d.fromPortalName; });
-            if (!_fp) return state;
-            _fromId = _fp.id;
-        }
-        var _links = new Map(state.portalLinks || new Map());
-        if ([..._links.values()].some(function(l) {
-            return l.fromPortalId === _fromId && l.toSelo === _d.toSelo && l.toPortalName === _d.toPortalName;
-        })) return state;
-        var _lid = uid('link');
-        _links.set(_lid, { id: _lid, fromPortalId: _fromId, toSelo: _d.toSelo, toPortalName: _d.toPortalName });
-        var _windowName = uid('lw') + '-' + _d.toSelo;
-        var _spawned = (state.spawned || []).slice();
-        var _maxDepth = _d.maxDepth != null ? _d.maxDepth : null;
-        _spawned.push({ windowName: _windowName, seloId: _d.toSelo,
-            linkId: _lid, isPortal: true, maxDepth: _maxDepth });
-        return Object.assign({}, state, { portalLinks: _links, spawned: _spawned });
-    }
-    // deleteLink: remove link and close its child VM.
-    // { id }
-    if (msg.type === 'deleteLink') {
-        var _d = msg.data || {};
-        if (!_d.id) return state;
-        var _links = new Map(state.portalLinks || new Map());
-        _links.delete(_d.id);
-        var _spawned = (state.spawned || []).filter(function(e) { return !(e && e.linkId === _d.id); });
-        return Object.assign({}, state, { portalLinks: _links, spawned: _spawned });
+        return state; // FRP portals node is authoritative; no worldState mutation needed
     }
 
     // ── Cross-world notification (via future + injectModelMessage) ─────
-    // _notifyPortalUpdate: called when a portal's meta changes.
-    // Finds parent VM(s) that have a link pointing to this portal,
-    // injects a notification so they can react (VIEW or model-level).
+    // _notifyPortalUpdate: finds parent VMs linked to this portal and injects
+    // a 'portalUpdated' message. Reads parent FRP portalLinks/spawned nodes directly.
     if (msg.type === '_notifyPortalUpdate') {
         var _d = msg.data || {};
         if (!_d.portalId || !app.vm) return state;
         var _vm    = app.vm;
         var _par   = _vm._parent;
         if (!_par) return state;
-        var _parState = _par.modelPS && _par._getModelNode(_par.modelPS, 'worldState');
-        var _parLinks = (_parState && _parState.portalLinks) || new Map();
-        var _portal   = (state.portals || new Map()).get(_d.portalId);
+        // Read parent FRP nodes (krestianified) — portalLinks is { map: Map }, spawned is []
+        var _plNode = _par.modelPS && _par._getModelNode(_par.modelPS, 'portalLinks');
+        var _parLinks = (_plNode && _plNode.map) || new Map();
+        var _parSpawned = (function() {
+            var n = _par.modelPS && _par._getModelNode(_par.modelPS, 'spawned');
+            return Array.isArray(n) ? n : [];
+        })();
+        // Read this VM's FRP portals node
+        var _pn2 = app._ps && ((app._ps.resolved && app._ps.resolved.get('portals'))
+                            || (app._ps.scratch  && app._ps.scratch.get('portals')));
+        var _pv2 = _pn2 && _pn2.value;
+        var _portalsMap2 = (_pv2 && _pv2.map instanceof Map) ? _pv2.map : new Map();
+        var _portal = _portalsMap2.get(_d.portalId);
         if (!_portal) return state;
         [..._parLinks.values()].forEach(function(lk) {
             if (lk.toSelo !== _vm.seloId || lk.toPortalName !== _portal.name) return;
-            var _entry = (_parState.spawned || []).find(function(e) { return e && e.linkId === lk.id; });
+            var _entry = _parSpawned.find(function(e) { return e && e.linkId === lk.id; });
             if (!_entry) return;
-            // Inject generic 'portalUpdated' into parent — parent app handles it
             _par.injectModelMessage('portalUpdated', {
-                linkId:      lk.id,
-                windowName:  _entry.windowName,
+                linkId:       lk.id,
+                windowName:   _entry.windowName,
                 fromPortalId: lk.fromPortalId,
-                toSelo:      _vm.seloId,
+                toSelo:       _vm.seloId,
                 toPortalName: _portal.name,
-                meta:        _portal.meta,
+                meta:         _portal.meta,
             }, _vm.seloId);
         });
         return state;
     }
 
-    // ── Spawned selos ──────────────────────────────────────────────────
-    if (msg.type === 'spawnSelo') {
-        var _d = msg.data || {};
-        var _seloId = _d.seloId || _d.name || uid(_d.appName || 'child');
-        var _wName  = uid('w') + '-' + _seloId;
-        var _spawned = (state.spawned || []).slice();
-        _spawned.push({ windowName: _wName, seloId: _seloId,
-            appName: _d.appName || null, maxDepth: _d.maxDepth != null ? _d.maxDepth : null });
-        return Object.assign({}, state, { spawned: _spawned });
-    }
-    // if (msg.type === '_closeWindow') {
-    //     var _d = msg.data || {};
-    //     if (!_d.name) return state;
-    //     var _spawned = (state.spawned || []).filter(function(e) {
-    //         return !((e && typeof e === 'object' ? e.windowName : e) === _d.name);
-    //     });
-    //     return Object.assign({}, state, { spawned: _spawned });
-    // }
-    // portalUpdated: cross-world notification, arrives via injectModelMessage.
+    // portalUpdated: cross-world notification arriving via injectModelMessage.
     // Bridges to VIEW by pushing to viewPS so _portalUpdatedRx receiver fires.
     // Apps declare:  const _portalUpdatedRx = Events.receiver();
-    // and get cross-world portal metadata with zero applyAction code.
     if (msg.type === 'portalUpdated') {
         if (app.viewPS) app.viewPS.registerEvent('_portalUpdatedRx', msg.data);
         return state;
@@ -437,16 +359,11 @@ function buildModelPreamble(applyActionBody) {
 const incoming = _raw;
 const worldState = Behaviors.collect(
     Object.assign({}, _initialState, {
-      time:        app.initialTime || 0,
-      queue:       _initialState.queue    || [],
-      objects:     _initialObjects,
-      spawned:     _initialState.spawned  || [],
-      ticking:     _initialState.ticking  || false,
-      windows:     new Map(Object.entries(_initialState.windows     || {})),
-      portals:     new Map(Object.entries(_initialState.portals     || {})),
-      portalLinks: new Map(Object.entries(_initialState.portalLinks || {})),
-      seed:        _initialState.seed     || 0,
-      _rngState:   _initialState._rngState || _xoroshiroSeed(_initialState.seed || 1) }),
+      time:      app.initialTime || 0,
+      queue:     _initialState.queue   || [],
+      _peers:    _initialObjects,
+      seed:      _initialState.seed    || 0,
+      _rngState: _initialState._rngState || _xoroshiroSeed(_initialState.seed || 1) }),
     Events.or(incoming, Events.change($worldState)),
     (state, ev) => {
         if (!ev) return state;
@@ -462,10 +379,15 @@ const worldState = Behaviors.collect(
 
     const vTimeSrc = _src(function() {
 // Core projections — seeded from _initialState so snapshot restore reads correctly
-const vTime   = Behaviors.collect((_initialState && _initialState.time)    || 0,  Events.change(worldState), (_, s) => s ? s.time    : 0);
-const objects = Behaviors.collect((_initialState && _initialState.objects) || {}, Events.change(worldState), (_, s) => s ? s.objects : {});
-// clients — sorted array of clientIds currently in the selo, derived from objects
-const clients = Behaviors.collect([], Events.change(objects), (_, objs) => objs ? [...objs.keys()].sort() : []);
+const vTime    = Behaviors.collect((_initialState && _initialState.time) || 0, Events.change(worldState), (_, s) => s ? s.time : 0);
+// _vmPeers — VM-internal peer registry: tracks who is connected (clientId → {joinedAt}).
+// Avatar data (color, x, y) is app-level concern — defined in the app's model program.
+const _vmPeers = Behaviors.collect(new Map(), Events.change(worldState), function(prev, s) {
+    if (!s || s._peers === prev) return prev;
+    return s._peers || new Map();
+});
+// clients — sorted array of clientIds currently in the selo, derived from _vmPeers
+const clients = Behaviors.collect([], Events.change(_vmPeers), (_, objs) => objs ? [...objs.keys()].sort() : []);
 // clientJoined — array of clientIds that just joined (fires on each objects change)
 // clientLeft   — array of clientIds that just left
 const _clientDiff = Behaviors.collect(
@@ -485,7 +407,7 @@ const clientLeft   = Behaviors.collect([], Events.change(_clientDiff), (_, d) =>
 
     return [
         'const app             = Renkon.app;',
-        'const _initialObjects = app.initialObjects ? new Map(Object.entries(app.initialObjects)) : new Map();',
+        'const _initialObjects = app.initialObjects ? new Map(Object.entries(app.initialObjects)) : new Map(); // peer registry seed (_peers)',
         'const _initialState   = app.initialState   || {};',
         'const _raw            = Events.receiver({ queued: true });',
         'const _pendingFutures = []; app._pendingFutures = _pendingFutures;',
@@ -561,7 +483,7 @@ const UI = Renkon.app.UI || window['KrestianstvoUI'] || null;
 const vm = Renkon.app.vm || null;
 // Core receivers — always available, pushed by vm after every drain
 const clientIdentity = Behaviors.collect({clientId:null,seloId:null}, Events.receiver(), function(_,id){return id;});
-const objects        = Behaviors.collect(new Map(), Events.receiver(), function(_,v){return v;});
+const objects        = Behaviors.collect({ map: new Map() }, Events.receiver(), function(_,v){return v;});
 const vTime          = Behaviors.collect(0,    Events.receiver(), function(_,v){return v;});
 // clients — pushed from model alongside objects; sorted array of clientIds in the selo
 const clients        = Behaviors.collect([], Events.receiver(), function(_,v){return v || [];});
@@ -570,7 +492,7 @@ const clientJoined   = Behaviors.collect([], Events.receiver(), function(_,v){re
 const clientLeft     = Behaviors.collect([], Events.receiver(), function(_,v){return v || [];});
 const myObject = Behaviors.collect(null, Events.change(objects), function(_, objs) {
     const id = clientIdentity && clientIdentity.clientId;
-    return id ? ((objs && objs.get(id)) || null) : null;
+    return id ? ((objs && objs.map && objs.map.get(id)) || null) : null;
 });
 
 // _kfy_send(type, data) — send an action to the reflector from any view node.
@@ -802,7 +724,7 @@ const children$ = Behaviors.collect(
             // Reset viewPS time-sensitive receivers so stale values from previous
             // session don't show (e.g. T still showing old vTime after page reload)
             this.viewPS.registerEvent('vTime', 0);
-            this.viewPS.registerEvent('objects', new Map());
+            this.viewPS.registerEvent('objects', { map: new Map() });
             this.viewPS.registerEvent('clients', []);
             this.viewPS.registerEvent('clientJoined', []);
             this.viewPS.registerEvent('clientLeft', []);
@@ -821,7 +743,7 @@ const children$ = Behaviors.collect(
         } else {
             // Joiner: reset stale viewPS state immediately — snapshot will repopulate correctly
             this.viewPS.registerEvent('vTime', 0);
-            this.viewPS.registerEvent('objects', new Map());
+            this.viewPS.registerEvent('objects', { map: new Map() });
             this.viewPS.registerEvent('clients', []);
             this.viewPS.registerEvent('clientJoined', []);
             this.viewPS.registerEvent('clientLeft', []);
@@ -878,32 +800,15 @@ const children$ = Behaviors.collect(
         const selo = this._restoreModelSelo(snap);
         this.modelPS = selo.ps;
         selo.ps.evaluate(snap.time || 0);
-        // Push objects + vTime directly from snapshot — fundamental, always present
-        this.viewPS.registerEvent('objects', snap.objects ? new Map(Object.entries(snap.objects)) : new Map());
-        this.viewPS.registerEvent('clients', snap.objects ? Object.keys(snap.objects).sort() : []);
+        // Push vTime + clients from snapshot — avatar objects pushed via modelStateKeys loop below
+        this.viewPS.registerEvent('clients', snap._peers ? Object.keys(snap._peers).sort() : []);
         this.viewPS.registerEvent('clientJoined', []);
         this.viewPS.registerEvent('clientLeft', []);
         this.viewPS.registerEvent('vTime',   snap.time   || 0);
         // Push modelStateKeys AFTER restoreModelSelo+evaluate so drain cannot overwrite them
-        // _snapVal: deserialize snapshot plain-object back to Map (or {map:Map} wrapper).
-        // The format depends on what the model PS node actually holds — check it to decide:
-        //   world app uses Behaviors.select → {map:Map} wrapper
-        //   portal-minimal uses Behaviors.collect → bare Map
-        var _vm = this;
-        var _mapFields = new Set(['objects','windows','portals','portalLinks']);
-        var _snapVal = function(k, v) {
-            if (v instanceof Map) return v;
-            if (_mapFields.has(k) && v && typeof v === 'object' && !Array.isArray(v)) {
-                var _m = new Map(Object.entries(v));
-                // Check model PS node to determine the format used by this app
-                var _modelVal = _vm._getModelNode(selo.ps, k);
-                if (_modelVal && _modelVal.map instanceof Map) return { map: _m };
-                return _m;
-            }
-            return v;
-        };
+        // Format detected from live model node — works for any krestianified app without VM changes.
         (this.modelStateKeys || []).forEach(k => {
-            if (snap[k] !== undefined) this.viewPS.registerEvent(k, _snapVal(k, snap[k]));
+            if (snap[k] !== undefined) this.viewPS.registerEvent(k, this._resolveSnapVal(selo.ps, k, snap[k]));
         });
         // Force one synchronous viewPS evaluation cycle so that view nodes like
         // _winSync run and set app.windowPositions before _onJoinedCallback fires.
@@ -915,7 +820,7 @@ const children$ = Behaviors.collect(
         var _snap2 = snap;
         Promise.resolve().then(function() {
             (_self2.modelStateKeys || []).forEach(function(k) {
-                if (_snap2[k] !== undefined) _self2.viewPS.registerEvent(k, _snapVal(k, _snap2[k]));
+                if (_snap2[k] !== undefined) _self2.viewPS.registerEvent(k, _self2._resolveSnapVal(selo.ps, k, _snap2[k]));
             });
         });
         const buffered = state.buffer;
@@ -934,18 +839,18 @@ const children$ = Behaviors.collect(
             var _self = this;
             var _wss = _self._getModelNode(selo.ps, 'worldState');
             if (_wss) {
-                _self.viewPS.registerEvent('objects', _wss.objects instanceof Map ? _wss.objects : (_wss.objects ? new Map(Object.entries(_wss.objects)) : new Map()));
-                _self.viewPS.registerEvent('clients', [...(_wss.objects instanceof Map ? _wss.objects : new Map(Object.entries(_wss.objects || {}))).keys()].sort());
+                // objects (avatar map) pushed below via _msp / modelStateKeys loop
+                var _peersMap = _wss._peers instanceof Map ? _wss._peers : (_wss._peers ? new Map(Object.entries(_wss._peers)) : new Map());
+                _self.viewPS.registerEvent('clients', [..._peersMap.keys()].sort());
                 _self.viewPS.registerEvent('clientJoined', []);
                 _self.viewPS.registerEvent('clientLeft', []);
                 _self.viewPS.registerEvent('vTime',   _wss.time   || 0);
             }
             var _msp = (selo.appRef && selo.appRef._modelStatePrev) || {};
             (_self.modelStateKeys || []).forEach(function(k) {
-                // Always use _snapVal to ensure correct format (e.g. {map:Map} wrapper).
                 // _msp may hold raw plain objects from initialState pre-seeding — not safe to push directly.
                 var _raw = (_msp[k] !== undefined) ? _msp[k] : snap[k];
-                var v = _snapVal(k, _raw);
+                var v = _self._resolveSnapVal(_self.modelPS, k, _raw);
                 if (v !== undefined) _self.viewPS.registerEvent(k, v);
             });
             // Reset children$ to snapshot's spawned list — clears stale children from previous selo
@@ -1019,8 +924,22 @@ const children$ = Behaviors.collect(
         if (typeof _buildUIFn === 'function') {
             try {
                 var _label  = (_self.viewAppExtra && _self.viewAppExtra.label) || '';
-                // Pass portalMount helper so buildUI doesn't need it in scope
-                var _helpers = {};
+                // Pass helpers so serialised buildUI (reconstructed via new Function) has them in scope.
+                var _helpers = {
+                    portalMount: function(rootEl) {
+                        if (rootEl && rootEl.querySelector && rootEl.querySelector('.vm-label')) {
+                            var c = rootEl.querySelector('.vm-content');
+                            if (!c) {
+                                c = document.createElement('div');
+                                c.className = 'vm-content';
+                                c.style.cssText = 'position:absolute;top:30px;left:0;right:0;bottom:0;overflow:hidden;';
+                                rootEl.appendChild(c);
+                            }
+                            return c;
+                        }
+                        return rootEl;
+                    }
+                };
                 var _result = _buildUIFn(_rootEl0, _label, _helpers);
                 // buildUI may return a child mount element — update rootEl if so
                 if (_result && _result !== _rootEl0 && typeof _result === 'object') {
@@ -1052,41 +971,40 @@ const children$ = Behaviors.collect(
         var _seloState = _self._getModelNode(_self.ps, 'seloState');
         var _clientId  = (_seloState && _seloState.clientId) || null;
         _self.viewPS.registerEvent('clientIdentity', { clientId: _clientId, seloId: _self.seloId });
-        _self.viewPS.registerEvent('objects',      snap.objects ? new Map(Object.entries(snap.objects)) : new Map());
-        _self.viewPS.registerEvent('clients',      snap.objects ? Object.keys(snap.objects).sort() : []);
+        // For first-peer path (snap={}), read live objects from model — _join may have been
+        // processed before _buildDomFromSnap ran, and we must not overwrite it with new Map().
+        var _liveWS      = _self.modelPS && _self._getModelNode(_self.modelPS, 'worldState');
+        var _livePeers = (_liveWS && _liveWS._peers) || null;
+        // objects (avatar map) pushed via modelStateKeys loop below
+        _self.viewPS.registerEvent('clients',
+            snap._peers ? Object.keys(snap._peers).sort() :
+            (_livePeers ? [..._livePeers.keys()].sort() : []));
         _self.viewPS.registerEvent('clientJoined', []);
         _self.viewPS.registerEvent('clientLeft',   []);
         _self.viewPS.registerEvent('vTime',        snap.time || 0);
-        var _mapFields2 = new Set(['objects','windows','portals','portalLinks']);
-        var _snapVal2 = function(k, v) {
-            if (v instanceof Map) return v;
-            if (_mapFields2.has(k) && v && typeof v === 'object' && !Array.isArray(v)) {
-                var _m2 = new Map(Object.entries(v));
-                // Check model PS node first, then view PS node, to determine {map:Map} vs bare Map
-                var _modelVal2 = _self.modelPS && _self._getModelNode(_self.modelPS, k);
-                if (_modelVal2 && _modelVal2.map instanceof Map) return { map: _m2 };
-                var _viewVal2 = _self.viewPS && _self._getModelNode(_self.viewPS, k);
-                if (_viewVal2 && _viewVal2.map instanceof Map) return { map: _m2 };
-                return _m2;
-            }
-            return v;
-        };
         (_self.modelStateKeys || []).forEach(function(k) {
-            if (snap[k] !== undefined) _self.viewPS.registerEvent(k, _snapVal2(k, snap[k]));
+            if (snap[k] !== undefined) _self.viewPS.registerEvent(k, _self._resolveSnapVal(_self.modelPS, k, snap[k]));
         });
+    }
+
+    // _resolveSnapVal — convert a snapshot-serialised value back to the live Map format.
+    // Detects format from the live model node: {map:Map} wrapper or bare Map.
+    _resolveSnapVal(ps, k, v) {
+        if (v && typeof v === 'object' && !Array.isArray(v)) {
+            var _live = this._getModelNode(ps, k);
+            if (_live && _live.map instanceof Map) return { map: new Map(Object.entries(v)) };
+            if (_live instanceof Map)              return new Map(Object.entries(v));
+        }
+        return v;
     }
 
     // _collectClientIds — recursively collect clientIds from this VM and all descendants.
     // Used by _destroy to synchronously remove ghost avatars from ancestor viewPSs.
     _collectClientIds() {
-        var ids = [];
-        if (this._clientId) ids.push(this._clientId);
-        if (this._childrenMap) {
-            this._childrenMap.forEach(function(child) {
-                ids = ids.concat(child._collectClientIds());
-            });
-        }
-        return ids;
+        return [
+            ...(this._clientId ? [this._clientId] : []),
+            ...Array.from(this._childrenMap?.values() || []).flatMap(c => c._collectClientIds()),
+        ];
     }
 
     // _destroy — recursively tear down this VM and all its children.
@@ -1111,13 +1029,23 @@ const children$ = Behaviors.collect(
             var _parModelApp = _par.modelPS && _par.modelPS.app;
             if (_parModelApp && !_parModelApp._dead) {
                 var _wss = _par._getModelNode(_par.modelPS, 'worldState');
-                if (_wss && _wss.objects instanceof Map) {
-                    _deadIds.forEach(function(id) { _wss.objects.delete(id); });
+                if (_wss) {
+                    // Update peer registry
+                    if (_wss._peers instanceof Map)
+                        _deadIds.forEach(function(id) { _wss._peers.delete(id); });
                     if (_par.viewPS) {
-                        var _objs = _wss.objects;
-                        _par.viewPS.registerEvent('objects', _objs);
-                        _par.viewPS.registerEvent('clients', [..._objs.keys()].sort());
+                        var _peersNow = _wss._peers instanceof Map ? _wss._peers : new Map();
+                        _par.viewPS.registerEvent('clients',    [..._peersNow.keys()].sort());
                         _par.viewPS.registerEvent('clientLeft', _deadIds);
+                        // Mutate the app-level avatar Map in-place and push so the renderer
+                        // removes ghost avatars immediately without waiting for reflector round-trip.
+                        var _appObjs = _par._getModelNode(_par.modelPS, 'objects');
+                        if (_appObjs && _appObjs.map instanceof Map) {
+                            _deadIds.forEach(function(id) { _appObjs.map.delete(id); });
+                            _par.viewPS.registerEvent('objects', { map: _appObjs.map });
+                            if (_parModelApp._modelStatePrev)
+                                _parModelApp._modelStatePrev['objects'] = { map: _appObjs.map };
+                        }
                     }
                 }
             }
@@ -1363,10 +1291,7 @@ const children$ = Behaviors.collect(
             try { payload._buildUI = _buildUI.toString(); } catch(e) {}
         }
         // Convert Map fields to plain objects for JSON serialization
-        if (payload.objects     instanceof Map) payload.objects     = Object.fromEntries(payload.objects);
-        if (payload.windows     instanceof Map) payload.windows     = Object.fromEntries(payload.windows);
-        if (payload.portals     instanceof Map) payload.portals     = Object.fromEntries(payload.portals);
-        if (payload.portalLinks instanceof Map) payload.portalLinks = Object.fromEntries(payload.portalLinks);
+        if (payload._peers instanceof Map) payload._peers = Object.fromEntries(payload._peers);
         (this.modelStateKeys || []).forEach(function(k) {
             if (payload[k] instanceof Map) { payload[k] = Object.fromEntries(payload[k]); }
             else if (payload[k] && payload[k].map instanceof Map) { payload[k] = Object.fromEntries(payload[k].map); }
@@ -1423,6 +1348,18 @@ const children$ = Behaviors.collect(
                 }
             }
             psRef._modelStatePrev = _prev;
+
+            // Push FRP 'spawned' model node to metaPS when it changes.
+            // Supports pure-FRP apps where applyAction is a passthrough and spawned
+            // is managed entirely by a Behaviors.select model node.
+            if (psRef.metaPS) {
+                var _spNode = (psRef._ps.resolved && psRef._ps.resolved.get('spawned'))
+                           || (psRef._ps.scratch  && psRef._ps.scratch.get('spawned'));
+                var _spVal = _spNode && _spNode.value;
+                if (Array.isArray(_spVal) && _spVal !== _before['spawned']) {
+                    psRef.metaPS.registerEvent('_spawned', _spVal.slice());
+                }
+            }
 
             // Flush any futures scheduled during FRP (e.g. from Behaviors.collect
             // accumulators calling future()). drain already ran so _pendingFutures were
@@ -1534,11 +1471,11 @@ const children$ = Behaviors.collect(
 
     // ── _restoreModelSelo ─────────────────────────────────────────────────
     _restoreModelSelo(snap) {
-        console.log('📸 restoreModelSelo t=', snap.time, 'peers:', Object.keys(snap.objects || {}));
-        var objects = snap.objects;
-        var rest    = Object.assign({}, snap);
-        delete rest.time; delete rest.objects;
-        return this._createModelSelo(snap.time, objects, rest);
+        console.log('📸 restoreModelSelo t=', snap.time, 'peers:', Object.keys(snap._peers || {}));
+        var peers = snap._peers;
+        var rest  = Object.assign({}, snap);
+        delete rest.time; delete rest._peers;
+        return this._createModelSelo(snap.time, peers, rest);
     }
 }
 

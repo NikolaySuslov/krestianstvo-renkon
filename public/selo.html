@@ -47,10 +47,11 @@ const seloId   = params.seloId;   // full rawKey e.g. "color:1" or "1"
 const wsUrl    = params.reflector;
 
 // ?app= query param takes priority; otherwise use appName from "appName:seloId" in ?k=
-// Default to 'world' so ?k=a behaves like ?k=world:a for fresh sessions.
+// If ?k=balls (no colon), check if 'balls' is a registered app before defaulting to 'world'.
 // Joiners of existing sessions are unaffected — snapshot programs overwrite on restore.
 const urlParams = new URLSearchParams(window.location.search);
-const appName   = urlParams.get('app') || params.appName || 'world';
+const appName   = urlParams.get('app') || params.appName
+               || (resolveApp(params.seloId + ':').appDef ? params.seloId : 'world');
 const appDef    = appName ? (resolveApp(appName + ':') || {}).appDef : null;
 
 const statusEl  = document.getElementById('status');

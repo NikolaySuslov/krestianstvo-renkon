@@ -304,6 +304,7 @@ const KrestianstvoUI = (() => {
         el.appendChild(rotateHandle);
 
         parentEl.appendChild(el);
+        //parentEl.insertBefore(el, parentEl.firstChild);
         return { el, titleBar, cinp, cbtn, closeBtn, resizeHandle, rotateHandle };
     }
 

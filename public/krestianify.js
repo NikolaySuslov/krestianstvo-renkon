@@ -162,8 +162,9 @@ function _kfy_findCrossDeps(allDecls, modelSet, viewSet) {
 // Model preamble: vTime, objects, clients (pushed to view after each drain)
 // View preamble:  clientIdentity, myObject, _kfy_send, Renkon
 var _KFY_VIEW_PREAMBLE_NAMES = new Set([
-    'vTime', 'objects', 'clients',                   // model→view, pushed directly by VM
+    'vTime', 'objects', 'clients',                   // model→view (objects pushed by VM or app modelStateKeys)
     'clientJoined', 'clientLeft', '_clientDiff',     // join/exit events, model→view
+    '_move', '_vmPeers',                             // VM internals — not cross-boundary
     'clientIdentity', 'myObject',                    // view-only, per-client identity
     '_kfy_send', 'Renkon', 'rootEl', 'UI', 'vm',     // view utilities
     'uid', 'random', 'now', 'future',                  // model builtins — available everywhere
@@ -332,10 +333,10 @@ function krestianify(userCode, modelNodes) {
         viewNodeStr +
         (viewSenderLines.length ? '\n\n// ── auto-send: view→model ──\n' + viewSenderLines.join('\n') : '');
 
-    // modelStateKeys = all model node names (they are the projection nodes the
-    // VM must snapshot and push to viewPS).
-    // Caller can override / trim this list if needed.
-    var modelStateKeys = modelDecls.map(function(d) { return d.name; });
+    // modelStateKeys = Behavior model nodes only (Events have no persistent state to snapshot/push).
+    var modelStateKeys = modelDecls
+        .filter(function(d) { return (types.get(d.name) || 'Behavior') !== 'Event'; })
+        .map(function(d) { return d.name; });
 
     return {
         modelProgram:    modelProgram,
