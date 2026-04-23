@@ -1020,7 +1020,8 @@ function _parsePortalInput(inputVal) {
     if (!v) return { seloId: '', appName: null, maxDepth: null, isPortal: false };
     // Parse trailing options: ":d=5" sets maxDepth
     var maxDepth = null;
-    var _dIdx = v.lastIndexOf(':d='); if (_dIdx >= 0) { var _dVal = v.slice(_dIdx + 3); if (_dVal && !isNaN(parseInt(_dVal, 10))) { maxDepth = parseInt(_dVal, 10); v = v.slice(0, _dIdx).trim(); } }
+    var _dMatch = v.match(/:d=(\d+)$/);
+    if (_dMatch) { maxDepth = parseInt(_dMatch[1], 10); v = v.slice(0, v.lastIndexOf(':d=')).trim(); }
     // "portal:p1" — create a named portal rect in this selo
     if (v.indexOf('portal:') === 0) {
         var _pname = v.slice(7).trim();
@@ -1058,16 +1059,9 @@ function _parsePortalInput(inputVal) {
 }
 
 
-const showSpwnedChildren = (()=>{
-    //console.log("Childs: ", clientJoined);
-    })();
-
 // ── renderer — 60hz DOM update ────────────────────────────────────────────
 const renderTick = Events.timer(16);
-const renderer = ((renderTick)=>
-//Behaviors.collect(null, renderTick, function(_, __) {
-
-{
+const renderer = Behaviors.collect(null, renderTick, function(_, __) {
     var rEl  = rootEl;
     if (!rEl || !UI) return null;
     var objs    = (objects && objects.map) || new Map();
@@ -1196,7 +1190,7 @@ const renderer = ((renderTick)=>
     });
 
     return null;
-})(renderTick);
+});
 
 // ── _avatarLeftSync — remove departed avatar elements on clientLeft event ──
 const _avatarLeftSync = Behaviors.collect(null, Events.change(clientLeft), function(_, left) {
@@ -1222,6 +1216,39 @@ const _exposePortalState = Behaviors.collect(null,
         return null;
     }
 );
+
+// ── _attachGesture — unified mouse+touch drag helper ─────────────────────
+// Attaches mousedown/touchstart to el; calls onStart(cx,cy), onMove(cx,cy),
+// onEnd(cx,cy) during drag. opts.filter(e) can veto the gesture start.
+function _attachGesture(el, onStart, onMove, onEnd, opts) {
+    var filter = opts && opts.filter;
+    function _mm(e) { onMove(e.clientX, e.clientY); }
+    function _mu(e) {
+        onEnd(e.clientX, e.clientY);
+        document.removeEventListener('mousemove', _mm);
+        document.removeEventListener('mouseup', _mu);
+    }
+    function _tm(e) { e.preventDefault(); var t = e.touches[0]; onMove(t.clientX, t.clientY); }
+    function _tu(e) {
+        var t = e.changedTouches[0]; onEnd(t.clientX, t.clientY);
+        document.removeEventListener('touchmove', _tm);
+        document.removeEventListener('touchend', _tu);
+    }
+    el.addEventListener('mousedown', function(e) {
+        if (filter && !filter(e)) return;
+        e.stopPropagation(); e.preventDefault();
+        onStart(e.clientX, e.clientY);
+        document.addEventListener('mousemove', _mm);
+        document.addEventListener('mouseup', _mu);
+    });
+    el.addEventListener('touchstart', function(e) {
+        if (filter && !filter(e)) return;
+        e.stopPropagation(); e.preventDefault();
+        var t = e.touches[0]; onStart(t.clientX, t.clientY);
+        document.addEventListener('touchmove', _tm, { passive: false });
+        document.addEventListener('touchend', _tu);
+    }, { passive: false });
+}
 
 // ── _portalRectSync — draggable portal viewport rectangles ────────────────
 // Each portal is a named dashed rectangle. Moving it shifts the viewport
@@ -1283,51 +1310,21 @@ const _portalRectSync = Behaviors.collect(null, Events.change(portals), function
                 'background:linear-gradient(325deg,transparent 50%,rgba(255,200,80,0.7) 50%);' +
                 'border-top-left-radius:3px;';
             (function(_pid) {
-                var _scaling=false,_last=0,_startY=0,_startScale=1;
-                function _startScale2(cy) {
-                    _scaling = true;
-                    _startY = cy;
-                    _startScale = parseFloat(rect.dataset.scale) || 1;
-                }
-                function _doScale(cy) {
-                    if (!_scaling) return;
-                    var now=Date.now(); if (now-_last<50) return; _last=now;
-                    var delta = (cy - _startY) / 100; // drag into rect (down) = zoom in
-                    var s = Math.max(0.1, Math.round((_startScale + delta) * 100) / 100);
-                    if (ws&&ws.readyState===1)
-                        ws.send(JSON.stringify({type:'scalePortal',data:{id:_pid,s:s}}));
-                }
-                function _endScale(cy) {
-                    if (!_scaling) return; _scaling=false;
-                    var delta = (cy - _startY) / 100;
-                    var s = Math.max(0.1, Math.round((_startScale + delta) * 100) / 100);
-                    if (ws&&ws.readyState===1)
-                        ws.send(JSON.stringify({type:'scalePortal',data:{id:_pid,s:s}}));
-                }
-                function _mm(e) { _doScale(e.clientY); }
-                function _mu(e) {
-                    _endScale(e.clientY);
-                    document.removeEventListener('mousemove',_mm);
-                    document.removeEventListener('mouseup',_mu);
-                }
-                function _tm(e) { e.preventDefault(); _doScale(e.touches[0].clientY); }
-                function _tu(e) {
-                    _endScale(e.changedTouches[0].clientY);
-                    document.removeEventListener('touchmove',_tm);
-                    document.removeEventListener('touchend',_tu);
-                }
-                _sh2.addEventListener('mousedown',function(e){
-                    e.stopPropagation(); e.preventDefault();
-                    _startScale2(e.clientY);
-                    document.addEventListener('mousemove',_mm);
-                    document.addEventListener('mouseup',_mu);
-                });
-                _sh2.addEventListener('touchstart',function(e){
-                    e.stopPropagation(); e.preventDefault();
-                    _startScale2(e.touches[0].clientY);
-                    document.addEventListener('touchmove',_tm,{passive:false});
-                    document.addEventListener('touchend',_tu);
-                },{passive:false});
+                var _scaling=false, _last=0, _startY=0, _startScale=1;
+                _attachGesture(_sh2,
+                    function(_, cy) { _scaling=true; _startY=cy; _startScale=parseFloat(rect.dataset.scale)||1; },
+                    function(_, cy) {
+                        if (!_scaling) return;
+                        var now=Date.now(); if (now-_last<50) return; _last=now;
+                        var s=Math.max(0.1,Math.round((_startScale+(cy-_startY)/100)*100)/100);
+                        if (ws&&ws.readyState===1) ws.send(JSON.stringify({type:'scalePortal',data:{id:_pid,s:s}}));
+                    },
+                    function(_, cy) {
+                        if (!_scaling) return; _scaling=false;
+                        var s=Math.max(0.1,Math.round((_startScale+(cy-_startY)/100)*100)/100);
+                        if (ws&&ws.readyState===1) ws.send(JSON.stringify({type:'scalePortal',data:{id:_pid,s:s}}));
+                    }
+                );
             })(pid);
             rect.appendChild(_sh2);
 
@@ -1338,51 +1335,19 @@ const _portalRectSync = Behaviors.collect(null, Events.change(portals), function
                 'background:linear-gradient(135deg,transparent 50%,rgba(100,180,255,0.7) 50%);' +
                 'border-bottom-right-radius:3px;';
             (function(_pid) {
-                var _sw=0,_sh=0,_sx=0,_sy=0,_rsz=false,_last=0;
-                function _doResize(cx, cy) {
-                    var now=Date.now(); if (now-_last<50) return; _last=now;
-                    if (ws&&ws.readyState===1)
-                        ws.send(JSON.stringify({type:'resizePortal',data:{id:_pid,
-                            w:Math.round(Math.max(80,_sw+cx-_sx)),
-                            h:Math.round(Math.max(60,_sh+cy-_sy))}}));
-                }
-                function _endResize(cx, cy) {
-                    if (!_rsz) return; _rsz=false;
-                    if (ws&&ws.readyState===1)
-                        ws.send(JSON.stringify({type:'resizePortal',data:{id:_pid,
-                            w:Math.round(Math.max(80,_sw+cx-_sx)),
-                            h:Math.round(Math.max(60,_sh+cy-_sy))}}));
-                }
-                function _mm(e) { if (!_rsz) return; _doResize(e.clientX, e.clientY); }
-                function _mu(e) {
-                    _endResize(e.clientX, e.clientY);
-                    document.removeEventListener('mousemove',_mm);
-                    document.removeEventListener('mouseup',_mu);
-                }
-                function _tm(e) {
-                    if (!_rsz) return;
-                    e.preventDefault();
-                    var t=e.touches[0]; _doResize(t.clientX, t.clientY);
-                }
-                function _tu(e) {
-                    var t=e.changedTouches[0]; _endResize(t.clientX, t.clientY);
-                    document.removeEventListener('touchmove',_tm);
-                    document.removeEventListener('touchend',_tu);
-                }
-                _rh.addEventListener('mousedown',function(e){
-                    e.stopPropagation(); e.preventDefault(); _rsz=true;
-                    _sw=parseInt(rect.style.width)||320; _sh=parseInt(rect.style.height)||240;
-                    _sx=e.clientX; _sy=e.clientY;
-                    document.addEventListener('mousemove',_mm);
-                    document.addEventListener('mouseup',_mu);
-                });
-                _rh.addEventListener('touchstart',function(e){
-                    e.stopPropagation(); e.preventDefault(); _rsz=true;
-                    _sw=parseInt(rect.style.width)||320; _sh=parseInt(rect.style.height)||240;
-                    var t=e.touches[0]; _sx=t.clientX; _sy=t.clientY;
-                    document.addEventListener('touchmove',_tm,{passive:false});
-                    document.addEventListener('touchend',_tu);
-                },{passive:false});
+                var _sw=0, _sh=0, _sx=0, _sy=0, _rsz=false, _last=0;
+                _attachGesture(_rh,
+                    function(cx, cy) { _rsz=true; _sw=parseInt(rect.style.width)||320; _sh=parseInt(rect.style.height)||240; _sx=cx; _sy=cy; },
+                    function(cx, cy) {
+                        if (!_rsz) return;
+                        var now=Date.now(); if (now-_last<50) return; _last=now;
+                        if (ws&&ws.readyState===1) ws.send(JSON.stringify({type:'resizePortal',data:{id:_pid,w:Math.round(Math.max(80,_sw+cx-_sx)),h:Math.round(Math.max(60,_sh+cy-_sy))}}));
+                    },
+                    function(cx, cy) {
+                        if (!_rsz) return; _rsz=false;
+                        if (ws&&ws.readyState===1) ws.send(JSON.stringify({type:'resizePortal',data:{id:_pid,w:Math.round(Math.max(80,_sw+cx-_sx)),h:Math.round(Math.max(60,_sh+cy-_sy))}}));
+                    }
+                );
             })(pid);
             rect.appendChild(_rh);
 
@@ -1393,116 +1358,44 @@ const _portalRectSync = Behaviors.collect(null, Events.change(portals), function
                 'background:linear-gradient(225deg,transparent 50%,rgba(100,220,160,0.7) 50%);' +
                 'border-bottom-left-radius:3px;';
             (function(_pid) {
-                var _rotating=false,_last=0,_startAngle=0,_startR=0;
+                var _rotating=false, _last=0, _startAngle=0, _startR=0;
                 function _rawAngle(cx, cy) {
-                    var br = rect.getBoundingClientRect();
-                    var _cx = br.left + br.width  / 2;
-                    var _cy = br.top  + br.height / 2;
-                    return Math.atan2(cy - _cy, cx - _cx) * 180 / Math.PI;
+                    var br=rect.getBoundingClientRect();
+                    return Math.atan2(cy-(br.top+br.height/2), cx-(br.left+br.width/2)) * 180/Math.PI;
                 }
-                function _startRotate(cx, cy) {
-                    _rotating = true;
-                    _startAngle = _rawAngle(cx, cy);
-                    _startR = parseFloat(rect.style.transform && rect.style.transform.replace('rotate(','').replace('deg)','')) || 0;
-                }
-                function _doRotate(cx, cy) {
-                    if (!_rotating) return;
-                    var now=Date.now(); if (now-_last<50) return; _last=now;
-                    var delta = _rawAngle(cx, cy) - _startAngle;
-                    var r = Math.round(_startR + delta);
-                    if (ws&&ws.readyState===1)
-                        ws.send(JSON.stringify({type:'rotatePortal',data:{id:_pid,r:r}}));
-                }
-                function _endRotate(cx, cy) {
-                    if (!_rotating) return; _rotating=false;
-                    var delta = _rawAngle(cx, cy) - _startAngle;
-                    var r = Math.round(_startR + delta);
-                    if (ws&&ws.readyState===1)
-                        ws.send(JSON.stringify({type:'rotatePortal',data:{id:_pid,r:r}}));
-                }
-                function _mm(e) { _doRotate(e.clientX, e.clientY); }
-                function _mu(e) {
-                    _endRotate(e.clientX, e.clientY);
-                    document.removeEventListener('mousemove',_mm);
-                    document.removeEventListener('mouseup',_mu);
-                }
-                function _tm(e) {
-                    e.preventDefault();
-                    var t=e.touches[0]; _doRotate(t.clientX, t.clientY);
-                }
-                function _tu(e) {
-                    var t=e.changedTouches[0]; _endRotate(t.clientX, t.clientY);
-                    document.removeEventListener('touchmove',_tm);
-                    document.removeEventListener('touchend',_tu);
-                }
-                _rot.addEventListener('mousedown',function(e){
-                    e.stopPropagation(); e.preventDefault();
-                    _startRotate(e.clientX, e.clientY);
-                    document.addEventListener('mousemove',_mm);
-                    document.addEventListener('mouseup',_mu);
-                });
-                _rot.addEventListener('touchstart',function(e){
-                    e.stopPropagation(); e.preventDefault();
-                    var t=e.touches[0]; _startRotate(t.clientX, t.clientY);
-                    document.addEventListener('touchmove',_tm,{passive:false});
-                    document.addEventListener('touchend',_tu);
-                },{passive:false});
+                _attachGesture(_rot,
+                    function(cx, cy) { _rotating=true; _startAngle=_rawAngle(cx,cy); _startR=parseFloat((rect.style.transform||'').replace(/rotate\(|deg\)/g,''))||0; },
+                    function(cx, cy) {
+                        if (!_rotating) return;
+                        var now=Date.now(); if (now-_last<50) return; _last=now;
+                        var r=Math.round(_startR+_rawAngle(cx,cy)-_startAngle);
+                        if (ws&&ws.readyState===1) ws.send(JSON.stringify({type:'rotatePortal',data:{id:_pid,r:r}}));
+                    },
+                    function(cx, cy) {
+                        if (!_rotating) return; _rotating=false;
+                        var r=Math.round(_startR+_rawAngle(cx,cy)-_startAngle);
+                        if (ws&&ws.readyState===1) ws.send(JSON.stringify({type:'rotatePortal',data:{id:_pid,r:r}}));
+                    }
+                );
             })(pid);
             rect.appendChild(_rot);
 
             // Drag — mouse + touch
             (function(_pid) {
-                var _ox=0,_oy=0,_mx=0,_my=0,_drag=false,_last=0;
-                function _startDrag(cx, cy) {
-                    _drag=true;
-                    _ox=parseInt(rect.style.left)||0; _oy=parseInt(rect.style.top)||0;
-                    _mx=cx; _my=cy;
-                }
-                function _doDrag(cx, cy) {
-                    if (!_drag) return;
-                    var now=Date.now(); if (now-_last<50) return; _last=now;
-                    if (ws&&ws.readyState===1)
-                        ws.send(JSON.stringify({type:'movePortal',data:{id:_pid,
-                            x:Math.round(_ox+cx-_mx),y:Math.round(_oy+cy-_my)}}));
-                }
-                function _endDrag(cx, cy) {
-                    if (!_drag) return; _drag=false;
-                    if (ws&&ws.readyState===1)
-                        ws.send(JSON.stringify({type:'movePortal',data:{id:_pid,
-                            x:Math.round(_ox+cx-_mx),y:Math.round(_oy+cy-_my)}}));
-                }
-                // Mouse
-                rect.addEventListener('mousedown', function(e) {
-                    if (e.target !== rect && e.target !== lbl) return;
-                    e.stopPropagation(); e.preventDefault();
-                    _startDrag(e.clientX, e.clientY);
-                    function _mm(e) { _doDrag(e.clientX, e.clientY); }
-                    function _mu(e) {
-                        _endDrag(e.clientX, e.clientY);
-                        document.removeEventListener('mousemove',_mm);
-                        document.removeEventListener('mouseup',_mu);
-                    }
-                    document.addEventListener('mousemove',_mm);
-                    document.addEventListener('mouseup',_mu);
-                });
-                // Touch
-                rect.addEventListener('touchstart', function(e) {
-                    if (e.target !== rect && e.target !== lbl) return;
-                    e.stopPropagation(); e.preventDefault();
-                    var t=e.touches[0];
-                    _startDrag(t.clientX, t.clientY);
-                    function _tm(e) {
-                        e.preventDefault();
-                        var t=e.touches[0]; _doDrag(t.clientX, t.clientY);
-                    }
-                    function _tu(e) {
-                        var t=e.changedTouches[0]; _endDrag(t.clientX, t.clientY);
-                        document.removeEventListener('touchmove',_tm);
-                        document.removeEventListener('touchend',_tu);
-                    }
-                    document.addEventListener('touchmove',_tm,{passive:false});
-                    document.addEventListener('touchend',_tu);
-                },{passive:false});
+                var _ox=0, _oy=0, _mx=0, _my=0, _drag=false, _last=0;
+                _attachGesture(rect,
+                    function(cx, cy) { _drag=true; _ox=parseInt(rect.style.left)||0; _oy=parseInt(rect.style.top)||0; _mx=cx; _my=cy; },
+                    function(cx, cy) {
+                        if (!_drag) return;
+                        var now=Date.now(); if (now-_last<50) return; _last=now;
+                        if (ws&&ws.readyState===1) ws.send(JSON.stringify({type:'movePortal',data:{id:_pid,x:Math.round(_ox+cx-_mx),y:Math.round(_oy+cy-_my)}}));
+                    },
+                    function(cx, cy) {
+                        if (!_drag) return; _drag=false;
+                        if (ws&&ws.readyState===1) ws.send(JSON.stringify({type:'movePortal',data:{id:_pid,x:Math.round(_ox+cx-_mx),y:Math.round(_oy+cy-_my)}}));
+                    },
+                    { filter: function(e) { return e.target === rect || e.target === lbl; } }
+                );
             })(pid);
 
             rEl.appendChild(rect);

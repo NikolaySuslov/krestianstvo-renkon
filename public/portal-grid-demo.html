@@ -108,13 +108,14 @@ async function setup() {
     await waitTick(400); // let world:1 process portals and push to viewPS
 
     // ── World:1: create 9 links q_i → p_i (one-way, world:1 views world:2) ──
-    // Read portal state from vm1's viewPS (exposed by _exposePortalState)
-    const portals1 = (vm1.viewPS && vm1.viewPS.app && vm1.viewPS.app._portalState) || {};
-    const pNames1  = Object.values(portals1).map(p => p.name);
+    // Read portal state from vm1's viewPS (exposed by _exposePortalState).
+    // _portalState is a Map, so use .values() not Object.values().
+    const portals1 = (vm1.viewPS && vm1.viewPS.app && vm1.viewPS.app._portalState) || new Map();
+    const pNames1  = [...portals1.values()].map(p => p.name);
     console.log('[grid] world:1 portals:', pNames1);
 
     for (let i = 1; i <= 9; i++) {
-        const fromPortal = Object.values(portals1).find(p => p.name === 'q' + i);
+        const fromPortal = [...portals1.values()].find(p => p.name === 'q' + i);
         if (!fromPortal) {
             console.warn('[grid] portal q' + i + ' not found in', pNames1);
             continue;

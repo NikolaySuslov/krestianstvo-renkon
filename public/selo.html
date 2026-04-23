@@ -46,12 +46,11 @@ const params   = parseUrlParams('kfy-demo', 'ws://localhost:3000');
 const seloId   = params.seloId;   // full rawKey e.g. "color:1" or "1"
 const wsUrl    = params.reflector;
 
-// ?app= query param takes priority; otherwise use appName from "appName:seloId" in ?k=
-// If ?k=balls (no colon), check if 'balls' is a registered app before defaulting to 'world'.
-// Joiners of existing sessions are unaffected — snapshot programs overwrite on restore.
+// ?app= takes priority; otherwise check if ?k= value is a registered app name.
+// Unknown names → blank joiner so snapshot programs always win for existing sessions.
 const urlParams = new URLSearchParams(window.location.search);
 const appName   = urlParams.get('app') || params.appName
-               || (resolveApp(params.seloId + ':').appDef ? params.seloId : 'world');
+               || (resolveApp(params.seloId + ':').appDef ? params.seloId : null);
 const appDef    = appName ? (resolveApp(appName + ':') || {}).appDef : null;
 
 const statusEl  = document.getElementById('status');
@@ -60,43 +59,48 @@ const rootEl    = document.getElementById('root');
 function setStatus(msg) { if (statusEl) statusEl.textContent = msg; }
 function hideStatus()   { if (statusEl) statusEl.style.display = 'none'; }
 
-setStatus('Joining selo ' + seloId + (params.appName ? '' : ' [world]') + '…');
+setStatus('Joining ' + seloId + (appName ? ' [' + appName + ']' : '') + '…');
 
 const vm = new KrestianstvoVM({ seloId, wsUrl, maxDepth: params.maxDepth });
 
 installDOMHandlers(vm, rootEl, resolveApp);
 vm.viewAppExtra.label = seloId;
 
-if (appDef) {
-    // Known app — compile and start with programs so first-peer boots immediately.
-    // If joiner, _onSnapshotApply restores snapshot programs (same app, no conflict).
-    // Store buildUI on viewAppExtra so _rebuildViewPSWhenReady can call it.
-    if (appDef.buildUI) vm.viewAppExtra._buildUI = appDef.buildUI;
-    vm.modelStateKeys = appDef.modelNodes ? appDef.modelNodes.slice() : [];
-}
-
 if (appDef && appDef.app) {
-    // Known app — compile for model, use overrides for view/applyAction if present
+    // Explicitly named app — compile and boot so first-peer starts immediately.
+    // Joiners: _onSnapshotApply restores snapshot programs (same app, no conflict).
     const compiled = krestianify(appDef.app, appDef.modelNodes || []);
     vm.modelStateKeys  = compiled.modelStateKeys;
     vm.viewEchoExclude = compiled.viewToModel;
-    // Call buildUI now so DOM elements exist before viewPS first tick
     if (appDef.buildUI) {
+        vm.viewAppExtra._buildUI = appDef.buildUI;
         try { appDef.buildUI(rootEl, seloId, { portalMount: portalMount }); } catch(e) {}
     }
-    // Inject KrestianstvoUI base styles (avatar, portal bar CSS)
     if (typeof KrestianstvoUI !== 'undefined' && KrestianstvoUI.injectStyles) {
         KrestianstvoUI.injectStyles();
     }
-    // viewProgram/applyAction override: some apps (e.g. world) supply their own
-    // view program separately from UNIFIED_APP (same pattern as krestianify-demo.html)
     vm.start({
         modelProgram: compiled.modelProgram,
         viewProgram:  appDef.viewProgram  || compiled.viewProgram,
         applyAction:  appDef.applyAction  || compiled.applyAction || '',
     });
 } else {
-    // Pure blank joiner — programs come from snapshot
+    // Blank joiner — programs come from snapshot.
+    // Provide world as _inheritedPrograms so first-peer of an unknown session
+    // boots world instead of an empty shell.
+    const worldResolved = resolveApp('world:');
+    const worldApp = worldResolved && worldResolved.appDef;
+    if (worldApp && worldApp.app) {
+        const wc = krestianify(worldApp.app, worldApp.modelNodes || []);
+        vm._inheritedPrograms = {
+            modelProgram:    wc.modelProgram,
+            viewProgram:     worldApp.viewProgram || wc.viewProgram,
+            applyAction:     worldApp.applyAction || '',
+            modelStateKeys:  wc.modelStateKeys.slice(),
+            viewEchoExclude: wc.viewToModel,
+            buildUI:         worldApp.buildUI || null,
+        };
+    }
     vm.start({});
 }
 
