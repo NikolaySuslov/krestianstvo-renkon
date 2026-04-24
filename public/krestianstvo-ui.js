@@ -2,6 +2,7 @@
 // Pure DOM construction and layout — no VM, no WS, no Renkon.
 //
 // API:
+//   KrestianstvoUI.createVMTitleBar(containerEl, { name, draggable, showClose, showJoin })
 //   KrestianstvoUI.createSeloContainer(name, parentEl, { onMove, onClose })
 //   KrestianstvoUI.makeDraggable(el, handleEl, { onMove })
 //   KrestianstvoUI.createPortalBar(rootEl, { onInput, onSubmit, disabled })
@@ -10,19 +11,23 @@
 const KrestianstvoUI = (() => {
 
     const C = {
-        border:      '#ccc',
-        titleBg:     'rgba(232,232,244,0.80)',
-        titleBorder: '#ccd',
-        titleText:   '#446',
-        statsText:   '#888',
-        inputBg:     '#f7f7f7',
-        inputBorder: '#bbb',
-        btnBg:       '#eef',
-        btnBorder:   '#aac',
+        border:      'rgba(175,175,205,0.50)',
+        titleBg:     'rgba(226,226,242,0.80)',
+        titleBorder: 'rgba(188,188,215,0.52)',
+        titleText:   '#445',
+        statsBg:     'rgba(236,236,250,0.48)',
+        statsBorder: 'rgba(185,185,215,0.28)',
+        statsText:   'rgba(62,72,108,0.62)',
+        inputBg:     'rgba(255,255,255,0.72)',
+        inputBorder: 'rgba(142,142,178,0.48)',
+        inputText:   '#334',
+        btnBg:       'rgba(222,222,242,0.72)',
+        btnBorder:   'rgba(128,128,172,0.48)',
         btnText:     '#446',
-        closeBg:     '#fdd',
-        closeText:   '#a44',
-        portalBg:    'rgba(245,245,255,0.80)',
+        closeBg:     'rgba(255,208,208,0.62)',
+        closeBorder: 'rgba(192,138,138,0.42)',
+        closeText:   '#a33',
+        portalBg:    'rgba(245,245,255,0.82)',
     };
 
     let _stylesInjected = false;
@@ -34,6 +39,8 @@ const KrestianstvoUI = (() => {
 .vm-root { position:absolute; inset:0; background:#f5f5f8; overflow:hidden; cursor:crosshair; outline:none; font-family:monospace; touch-action:none; }
 .avatar { position:absolute; pointer-events:none; }
 .vm-portal-bar { padding-bottom: max(5px, env(safe-area-inset-bottom)) !important; }
+.vm-close-btn { background:transparent; border:none; border-radius:3px; color:rgba(175,55,55,0.52); cursor:pointer; flex:0 0 auto; font-size:13px; width:16px; height:16px; display:flex; align-items:center; justify-content:center; padding:0; touch-action:manipulation; transition:background 0.1s,color 0.1s; }
+.vm-close-btn:hover { background:rgba(195,70,70,0.15); color:#b33; }
 `;
         document.head.appendChild(s);
     }
@@ -98,20 +105,100 @@ const KrestianstvoUI = (() => {
         };
     }
 
-    function createTitleBar(name) {
+    // Creates a compact title bar and appends it to containerEl.
+    // opts: { name, height, draggable, showClose, showJoin, showStats }
+    //   height defaults: 22px for window bars, pass 18 for stats-only bars
+    //   showClose → × button at far right
+    //   showJoin  → [input][Join] after label
+    //   showStats → T:clock P:peers at far right
+    // Returns: { bar, label, closeBtn, cinp, cbtn, clockEl, peersEl }
+    function createVMTitleBar(containerEl, opts) {
+        opts = opts || {};
+        const h = opts.height || 22;
+        const isStats = opts.showStats && !opts.showClose && !opts.showJoin;
+
         const bar = document.createElement('div');
         bar.style.cssText =
-            'position:absolute;top:0;left:0;right:0;height:30px;' +
-            'background:' + C.titleBg + ';border-bottom:1px solid ' + C.titleBorder + ';' +
-            'display:flex;align-items:center;padding:0 4px;gap:4px;' +
-            'font-size:11px;font-weight:bold;color:' + C.titleText + ';' +
-            'z-index:10;cursor:move;user-select:none;touch-action:none;';
+            'position:absolute;top:0;left:0;right:0;height:' + h + 'px;' +
+            'background:' + (isStats ? C.statsBg : C.titleBg) + ';' +
+            'border-bottom:1px solid ' + (isStats ? C.statsBorder : C.titleBorder) + ';' +
+            'display:flex;align-items:center;padding:0 5px;gap:3px;' +
+            'font-size:' + (isStats ? '9px' : '10px') + ';' +
+            'font-weight:' + (isStats ? 'normal' : 'bold') + ';' +
+            'color:' + (isStats ? C.statsText : C.titleText) + ';' +
+            'z-index:10;' + (opts.draggable ? 'cursor:move;' : '') +
+            'user-select:none;touch-action:none;box-sizing:border-box;';
+
+        // Close button first — left corner (macOS style), flat via CSS class
+        let closeBtn = null;
+        if (opts.showClose) {
+            closeBtn = document.createElement('button');
+            closeBtn.textContent = '×';
+            closeBtn.className = 'vm-close-btn';
+            closeBtn.addEventListener('mousedown', e => e.stopPropagation());
+            bar.appendChild(closeBtn);
+        }
+
         const label = document.createElement('span');
         label.className = 'vm-label';
-        label.textContent = name;
-        label.style.cssText = 'flex:0 0 auto;max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+        label.textContent = opts.name || '';
+        label.style.cssText = (isStats ? 'flex:1;min-width:0;' : 'flex:0 0 auto;') +
+            'max-width:' + (isStats ? 'none' : '58px') + ';' +
+            'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
         bar.appendChild(label);
-        return bar;
+
+        let cinp = null, cbtn = null;
+        if (opts.showJoin) {
+            cinp = document.createElement('input');
+            cinp.value = opts.name || '';
+            cinp.style.cssText =
+                'width:54px;padding:0 3px;height:16px;' +
+                'background:' + C.inputBg + ';color:' + C.inputText + ';' +
+                'border:1px solid ' + C.inputBorder + ';border-radius:3px;' +
+                'font-size:11px;font-family:monospace;flex:0 0 auto;' +
+                'touch-action:manipulation;-webkit-user-select:text;user-select:text;' +
+                'box-sizing:border-box;';
+            cinp.addEventListener('mousedown', e => e.stopPropagation());
+            cinp.addEventListener('keydown',   e => e.stopPropagation());
+            if (containerEl) {
+                cinp.addEventListener('focus', () => {
+                    containerEl._lockedW = containerEl.offsetWidth;
+                    containerEl._lockedH = containerEl.offsetHeight;
+                    containerEl.style.width  = containerEl._lockedW + 'px';
+                    containerEl.style.height = containerEl._lockedH + 'px';
+                });
+                cinp.addEventListener('blur', () => {
+                    containerEl._lockedW = null;
+                    containerEl._lockedH = null;
+                });
+            }
+
+            cbtn = document.createElement('button');
+            cbtn.textContent = 'Join';
+            cbtn.style.cssText =
+                'padding:0 5px;height:16px;' +
+                'background:' + C.btnBg + ';color:' + C.btnText + ';' +
+                'border:1px solid ' + C.btnBorder + ';border-radius:3px;' +
+                'font-size:10px;cursor:pointer;flex:0 0 auto;' +
+                'touch-action:manipulation;box-sizing:border-box;';
+            cbtn.addEventListener('mousedown', e => e.stopPropagation());
+
+            bar.appendChild(cinp);
+            bar.appendChild(cbtn);
+        }
+
+        let clockEl = null, peersEl = null;
+        if (opts.showStats) {
+            const vmStats = document.createElement('span');
+            vmStats.style.cssText = 'margin-left:auto;white-space:nowrap;flex-shrink:0;';
+            vmStats.innerHTML = 'T:<span class="vm-clock">-</span> P:<span class="vm-peers">-</span>';
+            bar.appendChild(vmStats);
+            clockEl = vmStats.querySelector('.vm-clock');
+            peersEl = vmStats.querySelector('.vm-peers');
+        }
+
+        if (containerEl) containerEl.appendChild(bar);
+        return { bar, label, closeBtn, cinp, cbtn, clockEl, peersEl };
     }
 
     function createSeloContainer(name, parentEl, opts) {
@@ -130,61 +217,24 @@ const KrestianstvoUI = (() => {
             'border-radius:6px;overflow:hidden;cursor:crosshair;' +
             'z-index:20;outline:none;box-shadow:0 2px 16px rgba(0,0,80,0.13);';
 
-        const titleBar = createTitleBar(name);
+        const tbResult = createVMTitleBar(el, {
+            name,
+            height:    22,
+            draggable: true,
+            showClose: true,
+            showJoin:  true,
+        });
+        const titleBar = tbResult.bar;
+        const cinp     = tbResult.cinp;
+        const cbtn     = tbResult.cbtn;
+        const closeBtn = tbResult.closeBtn;
 
-        const closeBtn = document.createElement('button');
-        closeBtn.textContent = '×';
-        closeBtn.style.cssText =
-            'margin-left:4px;padding:0 8px;height:24px;line-height:22px;min-width:28px;' +
-            'background:' + C.closeBg + ';color:' + C.closeText + ';' +
-            'border:1px solid #eaa;border-radius:4px;font-size:15px;cursor:pointer;' +
-            'flex:0 0 auto;touch-action:manipulation;';
-        closeBtn.addEventListener('mousedown', e => e.stopPropagation());
         closeBtn.addEventListener('click', e => {
             e.stopPropagation();
             if (el._destroyDrag) el._destroyDrag();
             el.remove();
             if (onClose) onClose(name);
         });
-        titleBar.appendChild(closeBtn);
-
-        const cinp = document.createElement('input');
-        cinp.value = name;
-        cinp.style.cssText =
-            'width:72px;padding:2px 5px;background:' + C.inputBg + ';color:#333;' +
-            'border:1px solid ' + C.inputBorder + ';border-radius:4px;' +
-            'font-size:16px;font-family:monospace;flex:0 0 auto;' +
-            'touch-action:manipulation;-webkit-user-select:text;user-select:text;' +
-            'min-height:24px;box-sizing:border-box;';
-        cinp.addEventListener('mousedown', e => e.stopPropagation());
-        cinp.addEventListener('keydown',   e => e.stopPropagation());
-        // iOS fix: when input is focused the visual viewport shrinks, which can
-        // cause the absolutely-positioned window to appear to resize. Lock the
-        // window's explicit width/height on focus so it stays put, and restore
-        // on blur. This prevents the "resize to input field size" bug on iPad.
-        cinp.addEventListener('focus', () => {
-            el._lockedW = el.offsetWidth;
-            el._lockedH = el.offsetHeight;
-            el.style.width  = el._lockedW + 'px';
-            el.style.height = el._lockedH + 'px';
-        });
-        cinp.addEventListener('blur', () => {
-            el._lockedW = null;
-            el._lockedH = null;
-        });
-
-        const cbtn = document.createElement('button');
-        cbtn.textContent = 'Join';
-        cbtn.style.cssText =
-            'padding:2px 8px;background:' + C.btnBg + ';color:' + C.btnText + ';' +
-            'border:1px solid ' + C.btnBorder + ';border-radius:4px;' +
-            'font-size:13px;cursor:pointer;flex:0 0 auto;' +
-            'min-height:24px;touch-action:manipulation;';
-        cbtn.addEventListener('mousedown', e => e.stopPropagation());
-
-        titleBar.appendChild(cinp);
-        titleBar.appendChild(cbtn);
-        el.appendChild(titleBar);
 
         makeDraggable(el, titleBar, {
             onMove: onMove ? (x, y) => onMove(name, x, y) : null
@@ -318,17 +368,22 @@ const KrestianstvoUI = (() => {
         bar = document.createElement('div');
         bar.className = 'vm-portal-bar';
         bar.style.cssText =
-            'position:absolute;bottom:0;left:0;right:0;display:flex;gap:6px;padding:6px 8px;' +
-            'background:' + C.portalBg + ';border-top:1px solid ' + C.titleBorder + ';' +
+            'position:absolute;bottom:0;left:0;right:0;height:30px;' +
+            'display:flex;align-items:center;gap:4px;' +
+            'padding:0 20px 0 26px;' +  /* clear rotate handle (22px left) and resize handle (14px right) */
+            'background:' + C.statsBg + ';border-top:1px solid ' + C.statsBorder + ';' +
             'z-index:20;box-sizing:border-box;';
 
         const inp = document.createElement('input');
-        inp.placeholder = disabled ? 'max depth reached' : 'selo / new:name';
+        inp.placeholder = disabled ? 'max depth reached' : 'selo / app:name';
         inp.disabled = disabled;
         inp.style.cssText =
-            'flex:1;min-width:0;padding:3px 7px;border:1px solid ' + C.titleBorder + ';border-radius:3px;' +
-            'font-size:16px;font-family:monospace;background:' + (disabled ? '#eee' : '#fff') + ';color:#334;' +
-            'touch-action:manipulation;-webkit-user-select:text;user-select:text;';
+            'flex:1;min-width:0;padding:0 5px;height:20px;' +
+            'border:1px solid ' + C.inputBorder + ';border-radius:3px;' +
+            'font-size:12px;font-family:monospace;' +
+            'background:' + (disabled ? 'rgba(220,220,230,0.5)' : C.inputBg) + ';color:#334;' +
+            'touch-action:manipulation;-webkit-user-select:text;user-select:text;' +
+            'box-sizing:border-box;';
         // iOS fix: lock rootEl dimensions during input focus to prevent
         // visual-viewport shrink from resizing the portal window container.
         // if (!disabled) {
@@ -352,10 +407,11 @@ const KrestianstvoUI = (() => {
         btn.textContent = 'Open';
         btn.disabled = disabled;
         btn.style.cssText =
-            'padding:3px 10px;background:' + (disabled ? '#ddd' : C.btnBg) + ';color:' + C.btnText + ';' +
-            'border:1px solid ' + C.btnBorder + ';border-radius:4px;font-size:14px;' +
-            'cursor:' + (disabled ? 'default' : 'pointer') + ';white-space:nowrap;' +
-            'touch-action:manipulation;min-height:28px;';
+            'padding:0 8px;height:20px;' +
+            'background:' + (disabled ? 'rgba(210,210,225,0.5)' : C.btnBg) + ';color:' + C.btnText + ';' +
+            'border:1px solid ' + (disabled ? 'rgba(180,180,200,0.3)' : C.btnBorder) + ';border-radius:3px;' +
+            'font-size:11px;cursor:' + (disabled ? 'default' : 'pointer') + ';white-space:nowrap;' +
+            'touch-action:manipulation;flex:0 0 auto;box-sizing:border-box;';
 
         bar.appendChild(inp);
         bar.appendChild(btn);
@@ -376,5 +432,5 @@ const KrestianstvoUI = (() => {
         return { bar, input: inp, button: btn };
     }
 
-    return { createSeloContainer, createPortalBar, makeDraggable, injectStyles, tilePosition };
+    return { createSeloContainer, createVMTitleBar, createPortalBar, makeDraggable, injectStyles, tilePosition };
 })();

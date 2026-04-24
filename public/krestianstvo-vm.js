@@ -186,24 +186,19 @@ const _vm_applyAction_builtin = (state, msg) => {
 const _vm_applyAction_portal = (state, msg) => {
     if (!msg) return state;
 
-    // updatePortal: update a portal's meta (app-defined payload). Reads from FRP
-    // portals node if available (krestianified apps), falls back to worldState.portals.
-    // Schedules _notifyPortalUpdate future to propagate to parent VMs.
-    // { id, ...meta }  OR  { name, ...meta }
+    // updatePortal: FRP portals arm handles the map update reactively.
+    // applyAction only schedules cross-VM notification future.
+    // { id, ...props }  OR  { name, ...props }
     if (msg.type === 'updatePortal') {
         var _d = msg.data || {};
-        // Read portals from FRP node (krestianified) or worldState (legacy)
         var _pn = app._ps && ((app._ps.resolved && app._ps.resolved.get('portals'))
                            || (app._ps.scratch  && app._ps.scratch.get('portals')));
         var _pv = _pn && _pn.value;
         var _portalsMap = (_pv && _pv.map instanceof Map) ? _pv.map : new Map();
         var _pid = _d.id || ([..._portalsMap.values()].find(function(p) { return p.name === _d.name; }) || {}).id;
-        if (!_pid || !_portalsMap.get(_pid)) return state;
-        var _meta = Object.assign({}, _portalsMap.get(_pid).meta || {}, _d);
-        delete _meta.id; delete _meta.name;
-        _portalsMap.set(_pid, Object.assign({}, _portalsMap.get(_pid), { meta: _meta }));
+        if (!_pid) return state;
         future(state.time, 0, '_notifyPortalUpdate', { portalId: _pid });
-        return state; // FRP portals node is authoritative; no worldState mutation needed
+        return state;
     }
 
     // ── Cross-world notification (via future + injectModelMessage) ─────
@@ -239,7 +234,7 @@ const _vm_applyAction_portal = (state, msg) => {
                 fromPortalId: lk.fromPortalId,
                 toSelo:       _vm.seloId,
                 toPortalName: _portal.name,
-                meta:         _portal.meta,
+                meta:         _portal.meta !== undefined ? _portal.meta : _portal,
             }, _vm.seloId);
         });
         return state;
@@ -405,6 +400,198 @@ const clientLeft   = Behaviors.collect([], Events.change(_clientDiff), (_, d) =>
 
 
 
+    // ── VM-provided portal/link/spawn preamble ────────────────────────────────
+    // These nodes are available in EVERY app without any declaration.
+    // Apps extend by using: portal_create/portal_link/selo_spawn helper sugar,
+    // or direct ws.send of createPortal/createLink/spawnSelo message types.
+    // 2D geometry (x,y,w,h,r,s) is stored directly on portal objects — flat schema.
+    // 1D apps (portal-minimal) just ignore x/y/w/h fields.
+    // 3D apps can add z/quaternion etc. via createPortal({ name, z, ... }).
+    const _vmPortalSrc = [
+        'const createPortal      = Events.receiver();',
+        'const createNamedPortal = Events.receiver();',
+        'const updatePortal      = Events.receiver();',
+        'const closePortal       = Events.receiver();',
+        'const movePortal        = Events.receiver();',
+        'const resizePortal      = Events.receiver();',
+        'const rotatePortal      = Events.receiver();',
+        'const scalePortal       = Events.receiver();',
+        'const createLink        = Events.receiver();',
+        'const deleteLink        = Events.receiver();',
+        'const _rotateLinkPortal = Events.receiver();',
+        'const _scaleLinkPortal  = Events.receiver();',
+        'const _moveLinkPortal   = Events.receiver();',
+        'const _setLinkMirror   = Events.receiver();',
+        'const spawnSelo         = Events.receiver();',
+        'const _joinWindow       = Events.receiver();',
+        'const _closeWindow      = Events.receiver();',
+        `const portals = Behaviors.select(
+    { map: new Map() },
+    Events.once(worldState), function(prev, s) {
+        if (!s || !s.portals) return prev;
+        var _m = s.portals instanceof Map ? new Map(s.portals) : new Map(Object.entries(s.portals));
+        return { map: _m };
+    },
+    createPortal, function(prev, ev) {
+        if (!ev || !ev.name) return prev;
+        if ([...prev.map.values()].some(function(p) { return p.name === ev.name; })) return prev;
+        var _pid = uid('p');
+        prev.map.set(_pid, Object.assign({}, ev, { id: _pid }));
+        return { map: prev.map };
+    },
+    createNamedPortal, function(prev, ev) {
+        if (!ev || !ev.name) return prev;
+        if ([...prev.map.values()].some(function(p) { return p.name === ev.name; })) return prev;
+        var _pid = uid('p');
+        prev.map.set(_pid, { id: _pid, name: ev.name,
+            x: ev.x != null ? ev.x : 80, y: ev.y != null ? ev.y : 80,
+            w: ev.w != null ? ev.w : 100, h: ev.h != null ? ev.h : 100 });
+        return { map: prev.map };
+    },
+    updatePortal, function(prev, ev) {
+        if (!ev) return prev;
+        var _pid = ev.id || ([...prev.map.values()].find(function(p) { return p.name === ev.name; }) || {}).id;
+        if (!_pid || !prev.map.get(_pid)) return prev;
+        prev.map.set(_pid, Object.assign({}, prev.map.get(_pid), ev, { id: _pid }));
+        return { map: prev.map };
+    },
+    movePortal, function(prev, ev) {
+        if (!ev || !ev.id || !prev.map.get(ev.id)) return prev;
+        prev.map.set(ev.id, Object.assign({}, prev.map.get(ev.id), { x: ev.x, y: ev.y }));
+        return { map: prev.map };
+    },
+    resizePortal, function(prev, ev) {
+        if (!ev || !ev.id || !prev.map.get(ev.id)) return prev;
+        prev.map.set(ev.id, Object.assign({}, prev.map.get(ev.id), { w: ev.w, h: ev.h }));
+        return { map: prev.map };
+    },
+    rotatePortal, function(prev, ev) {
+        if (!ev || !ev.id || !prev.map.get(ev.id)) return prev;
+        prev.map.set(ev.id, Object.assign({}, prev.map.get(ev.id), { r: ev.r }));
+        return { map: prev.map };
+    },
+    scalePortal, function(prev, ev) {
+        if (!ev || !ev.id || !prev.map.get(ev.id)) return prev;
+        prev.map.set(ev.id, Object.assign({}, prev.map.get(ev.id), { s: ev.s }));
+        return { map: prev.map };
+    },
+    closePortal, function(prev, ev) {
+        if (!ev || !ev.id) return prev;
+        prev.map.delete(ev.id);
+        return { map: prev.map };
+    });`,
+        `const portalLinks = Behaviors.select(
+    { map: new Map() },
+    Events.once(worldState), function(prev, s) {
+        if (!s || !s.portalLinks) return prev;
+        var _m = s.portalLinks instanceof Map ? new Map(s.portalLinks) : new Map(Object.entries(s.portalLinks));
+        return { map: _m };
+    },
+    createLink, function(prev, ev) {
+        if (!ev || !ev.toSelo || !ev.toPortalName) return prev;
+        var _fromPortalId = ev.fromPortalId;
+        if (!_fromPortalId || _fromPortalId === '__pending__') {
+            if (!ev.fromPortalName) return prev;
+            var _fp = [...portals.map.values()].find(function(p) { return p.name === ev.fromPortalName; });
+            if (!_fp) return prev;
+            _fromPortalId = _fp.id;
+        }
+        var _dup = [...prev.map.values()].some(function(l) {
+            return l.fromPortalId === _fromPortalId && l.toSelo === ev.toSelo && l.toPortalName === ev.toPortalName;
+        });
+        if (_dup) return prev;
+        var _lid = uid('link');
+        prev.map.set(_lid, { id: _lid, fromPortalId: _fromPortalId, toSelo: ev.toSelo, toPortalName: ev.toPortalName });
+        return { map: prev.map };
+    },
+    deleteLink, function(prev, ev) {
+        if (!ev || !ev.id) return prev;
+        prev.map.delete(ev.id);
+        return { map: prev.map };
+    },
+    closePortal, function(prev, ev) {
+        if (!ev || !ev.id) return prev;
+        prev.map.forEach(function(l, lid) { if (l.fromPortalId === ev.id) prev.map.delete(lid); });
+        return { map: prev.map };
+    },
+    _rotateLinkPortal, function(prev, ev) {
+        if (!ev || !ev.linkId || !prev.map.get(ev.linkId)) return prev;
+        prev.map.set(ev.linkId, Object.assign({}, prev.map.get(ev.linkId), { r: ev.r }));
+        return { map: prev.map };
+    },
+    _scaleLinkPortal, function(prev, ev) {
+        if (!ev || !ev.linkId || !prev.map.get(ev.linkId)) return prev;
+        prev.map.set(ev.linkId, Object.assign({}, prev.map.get(ev.linkId), { s: ev.s }));
+        return { map: prev.map };
+    },
+    _moveLinkPortal, function(prev, ev) {
+        if (!ev || !ev.linkId || !prev.map.get(ev.linkId)) return prev;
+        prev.map.set(ev.linkId, Object.assign({}, prev.map.get(ev.linkId), { x: ev.x, y: ev.y }));
+        return { map: prev.map };
+    },
+    _setLinkMirror, function(prev, ev) {
+        if (!ev || !ev.linkId || !prev.map.get(ev.linkId)) return prev;
+        prev.map.set(ev.linkId, Object.assign({}, prev.map.get(ev.linkId), { hasMirror: ev.hasMirror }));
+        return { map: prev.map };
+    });`,
+        `const spawned = Behaviors.select(
+    [],
+    Events.once(worldState), function(prev, s) {
+        if (!s || !s.spawned) return prev;
+        return Array.isArray(s.spawned) ? s.spawned.slice() : prev;
+    },
+    spawnSelo, function(prev, ev) {
+        if (!ev || (!ev.seloId && !ev.appName)) return prev;
+        var _seloId = ev.seloId || uid(ev.appName || 'child');
+        var _windowName = uid('w') + '-' + _seloId;
+        var _maxDepth = (ev.maxDepth != null) ? ev.maxDepth : null;
+        var _next = prev.slice();
+        _next.push({ windowName: _windowName, seloId: _seloId, appName: ev.appName || null, maxDepth: _maxDepth });
+        return _next;
+    },
+    createLink, function(prev, ev) {
+        if (!ev || !ev.toSelo || !ev.toPortalName) return prev;
+        var _fromPortalId = ev.fromPortalId;
+        if (!_fromPortalId || _fromPortalId === '__pending__') {
+            if (!ev.fromPortalName) return prev;
+            var _fp2 = [...portals.map.values()].find(function(p) { return p.name === ev.fromPortalName; });
+            if (!_fp2) return prev;
+            _fromPortalId = _fp2.id;
+        }
+        var _link = [...portalLinks.map.values()].find(function(l) {
+            return l.fromPortalId === _fromPortalId && l.toSelo === ev.toSelo && l.toPortalName === ev.toPortalName;
+        });
+        if (!_link) return prev;
+        var _windowName = _link.id + '-' + ev.toSelo;
+        var _maxDepth = (ev.maxDepth != null) ? ev.maxDepth : null;
+        var _next = prev.slice();
+        _next.push({ windowName: _windowName, seloId: ev.toSelo, linkId: _link.id, fromPortalId: _fromPortalId, isPortal: true, maxDepth: _maxDepth });
+        return _next;
+    },
+    deleteLink, function(prev, ev) {
+        if (!ev || !ev.id) return prev;
+        return prev.filter(function(e) { return !(e && e.linkId === ev.id); });
+    },
+    closePortal, function(prev, ev) {
+        if (!ev || !ev.id) return prev;
+        return prev.filter(function(e) { return !(e && e.isPortal && e.fromPortalId === ev.id); });
+    },
+    _closeWindow, function(prev, ev) {
+        if (!ev || !ev.name) return prev;
+        return prev.filter(function(e) {
+            var wn = (e && typeof e === 'object') ? e.windowName : e;
+            return wn !== ev.name;
+        });
+    },
+    _joinWindow, function(prev, ev) {
+        if (!ev || !ev.name || !ev.seloId) return prev;
+        return prev.map(function(e) {
+            if (!e || (typeof e === 'object' ? e.windowName : e) !== ev.name) return e;
+            return Object.assign({}, e, { seloId: ev.seloId });
+        });
+    });`,
+    ].join('\n');
+
     return [
         'const app             = Renkon.app;',
         'const _initialObjects = app.initialObjects ? new Map(Object.entries(app.initialObjects)) : new Map(); // peer registry seed (_peers)',
@@ -461,6 +648,7 @@ const clientLeft   = Behaviors.collect([], Events.change(_clientDiff), (_, d) =>
         drainSrc,
         worldStateSrc,
         vTimeSrc,
+        _vmPortalSrc,
         '',
     ].join('\n');
 }
@@ -490,16 +678,20 @@ const clients        = Behaviors.collect([], Events.receiver(), function(_,v){re
 // clientJoined / clientLeft — arrays of ids that joined/left since last objects change
 const clientJoined   = Behaviors.collect([], Events.receiver(), function(_,v){return v || [];});
 const clientLeft     = Behaviors.collect([], Events.receiver(), function(_,v){return v || [];});
+// VM built-in portal/link/spawn view receivers — always available, pushed via _effectiveStateKeys.
+const portals     = Behaviors.collect({ map: new Map() }, Events.receiver(), function(_,v){return v || { map: new Map() };});
+const portalLinks = Behaviors.collect({ map: new Map() }, Events.receiver(), function(_,v){return v || { map: new Map() };});
+const spawned     = Behaviors.collect([], Events.receiver(), function(_,v){return Array.isArray(v)?v:[];});
 const myObject = Behaviors.collect(null, Events.change(objects), function(_, objs) {
     const id = clientIdentity && clientIdentity.clientId;
     return id ? ((objs && objs.map && objs.map.get(id)) || null) : null;
 });
 
-// _kfy_send(type, data) — send an action to the reflector from any view node.
+// send(type, data) — send an action to the reflector from any view node.
 // krestianify auto-generates calls to this for every viewToModel node.
 // Queues messages until VM is fully joined, then flushes — no silent drops
 // on slow connections where WS or selo handshake isn't complete yet.
-const _kfy_send = function(type, data) {
+const send = function(type, data) {
     var ws = Renkon.app.ws;
     if (!ws) return;
     // Do not send during snapshot restore — VM not fully joined yet.
@@ -533,6 +725,17 @@ const _kfy_send = function(type, data) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 class KrestianstvoVM {
+
+    // VM-provided model nodes always included in snapshot/push without app listing them.
+    static _builtinStateKeys = ['portals', 'portalLinks', 'spawned'];
+
+    // App-specific modelStateKeys + VM built-ins, deduplicated.
+    get _effectiveStateKeys() {
+        var base = KrestianstvoVM._builtinStateKeys;
+        var seen = new Set(base);
+        var extra = (this.modelStateKeys || []).filter(function(k) { return !seen.has(k); });
+        return base.concat(extra);
+    }
 
     constructor({ wsUrl, seloId = 'default', depth = 0, maxDepth = 5 } = {}) {
         this.wsUrl        = wsUrl;
@@ -755,7 +958,7 @@ const children$ = Behaviors.collect(
                 this._applyAction  = '';
                 this.modelStateKeys = [];
                 this.viewEchoExclude = new Set();
-                // Mark viewPS as not joined — suppress _kfy_send until restore completes
+                // Mark viewPS as not joined — suppress send until restore completes
                 if (this.viewPS && this.viewPS.app) this.viewPS.app._joined = false;
             }
             if (this.onSeloJoined) this.onSeloJoined({ clientId: msg.clientId, seloId: msg.seloId });
@@ -807,7 +1010,7 @@ const children$ = Behaviors.collect(
         this.viewPS.registerEvent('vTime',   snap.time   || 0);
         // Push modelStateKeys AFTER restoreModelSelo+evaluate so drain cannot overwrite them
         // Format detected from live model node — works for any krestianified app without VM changes.
-        (this.modelStateKeys || []).forEach(k => {
+        this._effectiveStateKeys.forEach(k => {
             if (snap[k] !== undefined) this.viewPS.registerEvent(k, this._resolveSnapVal(selo.ps, k, snap[k]));
         });
         // Force one synchronous viewPS evaluation cycle so that view nodes like
@@ -819,7 +1022,7 @@ const children$ = Behaviors.collect(
         var _self2 = this;
         var _snap2 = snap;
         Promise.resolve().then(function() {
-            (_self2.modelStateKeys || []).forEach(function(k) {
+            _self2._effectiveStateKeys.forEach(function(k) {
                 if (_snap2[k] !== undefined) _self2.viewPS.registerEvent(k, _self2._resolveSnapVal(selo.ps, k, _snap2[k]));
             });
         });
@@ -847,8 +1050,7 @@ const children$ = Behaviors.collect(
                 _self.viewPS.registerEvent('vTime',   _wss.time   || 0);
             }
             var _msp = (selo.appRef && selo.appRef._modelStatePrev) || {};
-            (_self.modelStateKeys || []).forEach(function(k) {
-                // _msp may hold raw plain objects from initialState pre-seeding — not safe to push directly.
+            _self._effectiveStateKeys.forEach(function(k) {
                 var _raw = (_msp[k] !== undefined) ? _msp[k] : snap[k];
                 var v = _self._resolveSnapVal(_self.modelPS, k, _raw);
                 if (v !== undefined) _self.viewPS.registerEvent(k, v);
@@ -856,7 +1058,7 @@ const children$ = Behaviors.collect(
             // Reset children$ to snapshot's spawned list — clears stale children from previous selo
             this.ps.registerEvent('_spawned', snap.spawned || []);
             this._sendJoin();
-            // Mark viewPS as joined AFTER buffer replay — _kfy_send now allowed to fire
+            // Mark viewPS as joined AFTER buffer replay — send now allowed to fire
             if (_self.viewPS) _self.viewPS.app._joined = true;
         });
         return { phase: 'live', clientId: state.clientId, buffer: [], selo };
@@ -885,20 +1087,18 @@ const children$ = Behaviors.collect(
         snap = snap || {};
         const _self = this;
         const _rootEl0 = _self.viewAppExtra && _self.viewAppExtra.rootEl;
-        if (_rootEl0) {_self._buildDomFromSnap(_rootEl0, snap)};
-        
+        if (_rootEl0) {
+            _self._buildDomFromSnap(_rootEl0, snap);
+            //return;  // rootEl already available — no observer needed
+        }
         const observer = new window.MutationObserver((mutations, obs) => {
-            const _rootEl0 = _self.viewAppExtra && _self.viewAppExtra.rootEl;
-            if (_rootEl0) {
-                console.log("Element is now in the DOM!");
-                obs.disconnect(); // Stop looking once found
-                 _self._buildDomFromSnap(_rootEl0, snap)
+            const _rootEl = _self.viewAppExtra && _self.viewAppExtra.rootEl;
+            if (_rootEl) {
+                obs.disconnect();
+                _self._buildDomFromSnap(_rootEl, snap);
             }
         });
-        observer.observe(document.body, {
-            childList: true,
-            subtree: true
-        });
+        observer.observe(document.body, { childList: true, subtree: true });
     }
 
     _buildDomFromSnap(_rootEl0, snap) {
@@ -982,7 +1182,7 @@ const children$ = Behaviors.collect(
         _self.viewPS.registerEvent('clientJoined', []);
         _self.viewPS.registerEvent('clientLeft',   []);
         _self.viewPS.registerEvent('vTime',        snap.time || 0);
-        (_self.modelStateKeys || []).forEach(function(k) {
+        _self._effectiveStateKeys.forEach(function(k) {
             if (snap[k] !== undefined) _self.viewPS.registerEvent(k, _self._resolveSnapVal(_self.modelPS, k, snap[k]));
         });
     }
@@ -1119,23 +1319,16 @@ const children$ = Behaviors.collect(
 
             }
             const _parent = this;
-            const _spawnName = targetSeloId;
+            const _spawnName  = windowName;   // pass windowName directly — no reverse lookup needed
             const _spawnDepth = this.depth + 1;
             // _onJoinedCallback: fires when child is fully joined.
-            // Walks up _parent chain to find the root onSpawn handler — set once on root VM.
             child._onJoinedCallback = function() {
-                // Auto-register child with vm-lifecycle so goodbye is sent on navigation.
-                // Must happen before onSpawn so the wrapper is in place before app code runs.
                 if (typeof _parent._registerChildVM === 'function') {
                     _parent._registerChildVM(child);
                 }
-                // Call parent's onSpawn — parent handler is responsible for
-                // setting child.onSpawn for grandchildren (e.g. dom-demo makeSpawnHandler)
                 if (typeof _parent.onSpawn === 'function') {
                     _parent.onSpawn({ name: _spawnName, vm: child, depth: _spawnDepth });
                 }
-                // Link-based portals: no auto-pairing messages needed.
-                // _portalLinkSync reads remote portal state directly via childVM.viewPS.app._portalState.
             };
             // Child VMs start blank — they receive model+view programs from the
             // snapshot of the target selo (joiner path). If the child becomes the
@@ -1270,7 +1463,7 @@ const children$ = Behaviors.collect(
         // in _makeSend) over PS node read (which may be stale if last msg was FRP-driven).
         var _msp = (selo.appRef && selo.appRef._modelStatePrev) || {};
         console.log('[SNAP SEND] _modelStatePrev:', JSON.stringify(_msp));
-        (this.modelStateKeys || []).forEach(k => {
+        this._effectiveStateKeys.forEach(k => {
             var v = (_msp[k] !== undefined) ? _msp[k] : this._getModelNode(selo.ps, k);
             console.log('[SNAP SEND] key:', k, 'from _msp:', _msp[k], 'from ps:', this._getModelNode(selo.ps, k), '→', v);
             if (v !== undefined) payload[k] = v;
@@ -1292,7 +1485,7 @@ const children$ = Behaviors.collect(
         }
         // Convert Map fields to plain objects for JSON serialization
         if (payload._peers instanceof Map) payload._peers = Object.fromEntries(payload._peers);
-        (this.modelStateKeys || []).forEach(function(k) {
+        this._effectiveStateKeys.forEach(function(k) {
             if (payload[k] instanceof Map) { payload[k] = Object.fromEntries(payload[k]); }
             else if (payload[k] && payload[k].map instanceof Map) { payload[k] = Object.fromEntries(payload[k].map); }
         });
@@ -1405,13 +1598,13 @@ const children$ = Behaviors.collect(
             initialObjects:   initialObjects,
             initialState:     initialState,
             initialTime:      initialTime,
-            modelStateKeys:   this.modelStateKeys || [],
+            modelStateKeys:   this._effectiveStateKeys,
             viewEchoExclude:  this.viewEchoExclude || new Set(),
             _modelStatePrev: (function(keys, init) {
                 var p = {};
                 keys.forEach(function(k) { if (init[k] !== undefined) p[k] = init[k]; });
                 return p;
-            })(this.modelStateKeys || [], initialState),
+            })(this._effectiveStateKeys, initialState),
         };
         var modelSrc = buildModelPreamble(this._applyAction) + '\n' + this._modelProgram;
         var ps = new (_getProgramState())(initialTime, appRef, true);

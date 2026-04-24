@@ -160,18 +160,27 @@ function _kfy_findCrossDeps(allDecls, modelSet, viewSet) {
 // Names always pre-declared by VM preambles — compiler must not generate
 // receiver stubs or cross-boundary wiring for these.
 // Model preamble: vTime, objects, clients (pushed to view after each drain)
-// View preamble:  clientIdentity, myObject, _kfy_send, Renkon
+// View preamble:  clientIdentity, myObject, send, Renkon
 var _KFY_VIEW_PREAMBLE_NAMES = new Set([
     'vTime', 'objects', 'clients',                   // model→view (objects pushed by VM or app modelStateKeys)
     'clientJoined', 'clientLeft', '_clientDiff',     // join/exit events, model→view
     '_move', '_vmPeers',                             // VM internals — not cross-boundary
     'clientIdentity', 'myObject',                    // view-only, per-client identity
-    '_kfy_send', 'Renkon', 'rootEl', 'UI', 'vm',     // view utilities
-    'uid', 'random', 'now', 'future',                  // model builtins — available everywhere
-    // Portal helper functions — available in every model program (model preamble)
+    'send', 'Renkon', 'rootEl', 'UI', 'vm',     // view utilities
+    'uid', 'random', 'now', 'future',                // model builtins — available everywhere
+    'seloId', 'injectModelMessage',                  // model preamble constants
+    // Portal/link/spawn helper sugar (model preamble)
     'portal_create', 'portal_update', 'portal_delete',
     'portal_link', 'portal_unlink', 'selo_spawn', 'inject',
-    'injectModelMessage', 'seloId',                   // also model preamble constants
+    // VM-provided portal/link/spawn FRP nodes — in MODEL preamble AND VIEW_PREAMBLE.
+    // Listing here prevents krestianify from generating duplicate receiver stubs
+    // when apps include these in modelNodes or when view code references them.
+    'portals', 'portalLinks', 'spawned',
+    // VM-provided receiver names (model preamble) — never generate cross-boundary stubs
+    'createPortal', 'createNamedPortal', 'updatePortal', 'closePortal',
+    'movePortal', 'resizePortal', 'rotatePortal', 'scalePortal',
+    'createLink', 'deleteLink', '_rotateLinkPortal', '_scaleLinkPortal', '_moveLinkPortal', '_setLinkMirror',
+    'spawnSelo', '_joinWindow', '_closeWindow',
 ]);
 
 function krestianify(userCode, modelNodes) {
@@ -241,11 +250,11 @@ function krestianify(userCode, modelNodes) {
         // Events can be used directly as triggers.
         var t = types.get(name) || 'Behavior';
         var trigger = (t === 'Event') ? name : 'Events.change(' + name + ')';
-        // _kfy_send is provided by VIEW_PREAMBLE in krestianstvo-vm.js.
+        // send is provided by VIEW_PREAMBLE in krestianstvo-vm.js.
         viewSenderLines.push(
-            'const _kfy_send_' + name + ' = Behaviors.collect(null, ' + trigger + ', function(_, v) {\n' +
+            'const send_' + name + ' = Behaviors.collect(null, ' + trigger + ', function(_, v) {\n' +
             '    if (v === undefined || v === null) return null;\n' +
-            '    _kfy_send("' + name + '", v);\n' +
+            '    send("' + name + '", v);\n' +
             '    return null;\n' +
             '});'
         );

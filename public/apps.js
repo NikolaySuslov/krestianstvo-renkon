@@ -211,9 +211,7 @@ const _spaceKey = Behaviors.collect(false, Events.once(vTime), function(done, _)
     rEl.addEventListener('keydown', function(e) {
         if (e.code !== 'Space' || e.repeat) return;
         e.preventDefault();
-        var ws = Renkon.app.ws;
-        if (ws && ws.readyState === WebSocket.OPEN)
-            ws.send(JSON.stringify({ type: 'toggleTick', data: {} }));
+        send('toggleTick', {});
     });
     return true;
 });
@@ -416,15 +414,12 @@ const _render = Behaviors.collect(null,
 
 // ── world ──────────────────────────────────────────────────────────────────
 // The main krestianstvo demo — avatars, portal bar, counter, ticking, sub-portals.
-// Uses UNIFIED_APP for model compilation but overrides viewProgram/applyAction
-// with the full dom-demo VIEW_PROGRAM (same pattern as krestianify-demo.html).
+// Pure krestianified: single unified app string, krestianify splits model/view.
 APPS["world"] = {
     modelNodes: ['objects', '_move',
-                 'windows', '_moveWindow', '_resizeWindow', '_rotateWindow', '_closeWindow', '_applyWindowResize',
-                 'portals', 'movePortal', 'resizePortal', 'rotatePortal', 'scalePortal',
-                 'portalLinks', '_rotateLinkPortal', '_scaleLinkPortal',
-                 'spawned',
-                 '_notifyLinkedResize', '_notifyLinkedRotate', '_notifyLinkedScale',
+                 'windows', '_moveWindow', '_resizeWindow', '_rotateWindow', '_applyWindowResize',
+                 '_notifyLinkedResize', '_notifyLinkedRotate', '_notifyLinkedScale', '_notifyLinkedMove',
+                 '_notifyLinkedPortalPos', '_notifyLinkedMirror',
                  'setPortal', 'portalText'],
     app: `
 // ── MODEL nodes: shared, deterministic, replicated ────────────────────────
@@ -472,7 +467,7 @@ const objects = Behaviors.select(
 const _moveWindow        = Events.receiver();
 const _resizeWindow      = Events.receiver();
 const _rotateWindow      = Events.receiver();
-const _closeWindow       = Events.receiver();
+// _closeWindow — provided by VM preamble
 const _applyWindowResize = Events.receiver();
 const windows = Behaviors.select(
     { map: new Map() },
@@ -512,189 +507,14 @@ const windows = Behaviors.select(
     }
 );
 
-// portals — Behaviors.select: pure FRP. Model-generated IDs via uid('p').
-// new Map() initial is safe; Events.once(worldState) seeds from snapshot before any arm fires.
-const createPortal      = Events.receiver();
-const createNamedPortal = Events.receiver();
-const movePortal        = Events.receiver();
-const resizePortal      = Events.receiver();
-const rotatePortal      = Events.receiver();
-const scalePortal       = Events.receiver();
-const closePortal       = Events.receiver();
-const portals = Behaviors.select(
-    { map: new Map() },
-    Events.once(worldState), function(prev, s) {
-        if (!s || !s.portals) return prev;
-        var _m = s.portals instanceof Map ? new Map(s.portals) : new Map(Object.entries(s.portals));
-        return { map: _m };
-    },
-    createPortal, function(prev, ev) {
-        if (!ev || !ev.name) return prev;
-        if ([...prev.map.values()].some(function(p) { return p.name === ev.name; })) return prev;
-        var _pid = uid('p');
-        prev.map.set(_pid, {
-            id: _pid, name: ev.name,
-            x: ev.x != null ? ev.x : 60, y: ev.y != null ? ev.y : 60,
-            w: ev.w != null ? ev.w : 320, h: ev.h != null ? ev.h : 240,
-        });
-        return { map: prev.map };
-    },
-    createNamedPortal, function(prev, ev) {
-        if (!ev || !ev.name) return prev;
-        if ([...prev.map.values()].some(function(p) { return p.name === ev.name; })) return prev;
-        var _pid = uid('p');
-        prev.map.set(_pid, {
-            id: _pid, name: ev.name,
-            x: ev.x != null ? ev.x : 80, y: ev.y != null ? ev.y : 80,
-            w: ev.w != null ? ev.w : 100, h: ev.h != null ? ev.h : 100,
-        });
-        return { map: prev.map };
-    },
-    movePortal, function(prev, ev) {
-        if (!ev || !ev.id || !prev.map.get(ev.id)) return prev;
-        prev.map.set(ev.id, Object.assign({}, prev.map.get(ev.id), { x: ev.x, y: ev.y }));
-        return { map: prev.map };
-    },
-    resizePortal, function(prev, ev) {
-        if (!ev || !ev.id || !prev.map.get(ev.id)) return prev;
-        prev.map.set(ev.id, Object.assign({}, prev.map.get(ev.id), { w: ev.w, h: ev.h }));
-        return { map: prev.map };
-    },
-    rotatePortal, function(prev, ev) {
-        if (!ev || !ev.id || !prev.map.get(ev.id)) return prev;
-        prev.map.set(ev.id, Object.assign({}, prev.map.get(ev.id), { r: ev.r }));
-        return { map: prev.map };
-    },
-    scalePortal, function(prev, ev) {
-        if (!ev || !ev.id || !prev.map.get(ev.id)) return prev;
-        prev.map.set(ev.id, Object.assign({}, prev.map.get(ev.id), { s: ev.s }));
-        return { map: prev.map };
-    },
-    closePortal, function(prev, ev) {
-        if (!ev || !ev.id) return prev;
-        prev.map.delete(ev.id);
-        return { map: prev.map };
-    }
-);
+// portals, createPortal, createNamedPortal, movePortal, resizePortal, rotatePortal,
+// scalePortal, closePortal — provided by VM model preamble. No declaration needed.
 
-// portalLinks — Behaviors.select: pure FRP. Model-generated IDs via uid('link').
-// new Map() initial is safe; Events.once(worldState) seeds from snapshot before any arm fires.
-const createLink        = Events.receiver();
-const deleteLink        = Events.receiver();
-const _rotateLinkPortal = Events.receiver();
-const _scaleLinkPortal  = Events.receiver();
-const portalLinks = Behaviors.select(
-    { map: new Map() },
-    Events.once(worldState), function(prev, s) {
-        if (!s || !s.portalLinks) return prev;
-        var _m = s.portalLinks instanceof Map ? new Map(s.portalLinks) : new Map(Object.entries(s.portalLinks));
-        return { map: _m };
-    },
-    createLink, function(prev, ev) {
-        if (!ev || !ev.toSelo || !ev.toPortalName) return prev;
-        var _fromPortalId = ev.fromPortalId;
-        if (!_fromPortalId || _fromPortalId === '__pending__') {
-            if (!ev.fromPortalName) return prev;
-            var _fp = [...portals.map.values()].find(function(p) { return p.name === ev.fromPortalName; });
-            if (!_fp) return prev;
-            _fromPortalId = _fp.id;
-        }
-        var _dup = [...prev.map.values()].some(function(l) {
-            return l.fromPortalId === _fromPortalId && l.toSelo === ev.toSelo && l.toPortalName === ev.toPortalName;
-        });
-        if (_dup) return prev;
-        var _lid = uid('link'); // deterministic: same uid() call order on all peers
-        prev.map.set(_lid, { id: _lid, fromPortalId: _fromPortalId, toSelo: ev.toSelo, toPortalName: ev.toPortalName });
-        return { map: prev.map };
-    },
-    deleteLink, function(prev, ev) {
-        if (!ev || !ev.id) return prev;
-        prev.map.delete(ev.id);
-        return { map: prev.map };
-    },
-    closePortal, function(prev, ev) {
-        if (!ev || !ev.id) return prev;
-        prev.map.forEach(function(l, lid) {
-            if (l.fromPortalId === ev.id || l.toPortalId === ev.id) prev.map.delete(lid);
-        });
-        return { map: prev.map };
-    },
-    _rotateLinkPortal, function(prev, ev) {
-        if (!ev || !ev.linkId || !prev.map.get(ev.linkId)) return prev;
-        prev.map.set(ev.linkId, Object.assign({}, prev.map.get(ev.linkId), { r: ev.r }));
-        return { map: prev.map };
-    },
-    _scaleLinkPortal, function(prev, ev) {
-        if (!ev || !ev.linkId || !prev.map.get(ev.linkId)) return prev;
-        prev.map.set(ev.linkId, Object.assign({}, prev.map.get(ev.linkId), { s: ev.s }));
-        return { map: prev.map };
-    }
-);
+// portalLinks, createLink, deleteLink, _rotateLinkPortal, _scaleLinkPortal —
+// provided by VM model preamble. No declaration needed.
 
-// spawned — Behaviors.select: pure FRP list of child VMs to maintain.
-// [] initial is safe; Events.once(worldState) seeds from snapshot before any arm fires.
-// _diffChildren in meta PS reads this node directly — no worldState mirror needed.
-const spawnSelo   = Events.receiver();
-const _joinWindow = Events.receiver();
-const spawned = Behaviors.select(
-    [],
-    Events.once(worldState), function(prev, s) {
-        if (!s || !s.spawned) return prev;
-        return Array.isArray(s.spawned) ? s.spawned.slice() : prev;
-    },
-    spawnSelo, function(prev, ev) {
-        if (!ev || (!ev.seloId && !ev.appName)) return prev;
-        var _seloId = ev.seloId || uid(ev.appName || 'child'); // uid fallback mirrors old VM behavior
-        var _windowName = uid('w') + '-' + _seloId;
-        var _maxDepth = (ev.maxDepth != null) ? ev.maxDepth : null;
-        var _next = prev.slice();
-        _next.push({ windowName: _windowName, seloId: _seloId, appName: ev.appName || null, maxDepth: _maxDepth });
-        return _next;
-    },
-    createLink, function(prev, ev) {
-        if (!ev || !ev.toSelo || !ev.toPortalName) return prev;
-        // portalLinks arm runs first (declared above) — read the just-created link for its id.
-        var _fromPortalId = ev.fromPortalId;
-        if (!_fromPortalId || _fromPortalId === '__pending__') {
-            if (!ev.fromPortalName) return prev;
-            var _fp = [...portals.map.values()].find(function(p) { return p.name === ev.fromPortalName; });
-            if (!_fp) return prev;
-            _fromPortalId = _fp.id;
-        }
-        var _link = [...portalLinks.map.values()].find(function(l) {
-            return l.fromPortalId === _fromPortalId && l.toSelo === ev.toSelo && l.toPortalName === ev.toPortalName;
-        });
-        if (!_link) return prev; // portalLinks rejected it (dup or missing portal)
-        var _windowName = _link.id + '-' + ev.toSelo;
-        var _maxDepth = (ev.maxDepth != null) ? ev.maxDepth : null;
-        var _next = prev.slice();
-        _next.push({ windowName: _windowName, seloId: ev.toSelo, linkId: _link.id, fromPortalId: _fromPortalId, isPortal: true, maxDepth: _maxDepth });
-        return _next;
-    },
-    deleteLink, function(prev, ev) {
-        if (!ev || !ev.id) return prev;
-        return prev.filter(function(e) { return !(e && e.linkId === ev.id); });
-    },
-    closePortal, function(prev, ev) {
-        if (!ev || !ev.id) return prev;
-        // Filter entries whose fromPortalId matches — no portalLinks lookup needed.
-        return prev.filter(function(e) { return !(e && e.isPortal && e.fromPortalId === ev.id); });
-    },
-    _closeWindow, function(prev, ev) {
-        if (!ev || !ev.name) return prev;
-        return prev.filter(function(e) {
-            var wn = (e && typeof e === 'object') ? e.windowName : e;
-            return wn !== ev.name;
-        });
-    },
-    _joinWindow, function(prev, ev) {
-        if (!ev || !ev.name || !ev.seloId) return prev;
-        return prev.map(function(e) {
-            if (!e || (typeof e === 'object' ? e.windowName : e) !== ev.name) return e;
-            return Object.assign({}, e, { seloId: ev.seloId });
-        });
-    }
-);
+// spawned, spawnSelo, _joinWindow, _closeWindow — provided by VM model preamble.
+// No declaration needed.
 
 // _notifyLinkedResize/Rotate/Scale — model-side side-effect nodes.
 // Fire when a portal is resized/rotated/scaled; inject into parent VM so its
@@ -739,209 +559,223 @@ const _notifyLinkedScale = Behaviors.collect(null, scalePortal, (_, ev) => {
     });
     return null;
 });
+const _notifyLinkedMove = Behaviors.collect(null, movePortal, (_, ev) => {
+    if (!ev?.id || !app.vm) return null;
+    const _vm2 = app.vm, _parentVM = _vm2._parent;
+    if (!_parentVM) return null;
+    const _parentLinks = (_parentVM._getModelNode(_parentVM.modelPS, 'portalLinks')?.map) || new Map();
+    const _toPortal = portals.map.get(ev.id);
+    [..._parentLinks.values()].forEach(lk => {
+        if (lk.toSelo !== _vm2.seloId || _toPortal?.name !== lk.toPortalName) return;
+        _parentVM.injectModelMessage('_moveLinkPortal', { linkId: lk.id, x: ev.x, y: ev.y }, _vm2.seloId);
+    });
+    return null;
+});
+const _notifyLinkedPortalPos = Behaviors.collect(null, Events.change(portals), (_, __) => {
+    if (!app.vm) return null;
+    const _vm2 = app.vm, _parentVM = _vm2._parent;
+    if (!_parentVM) return null;
+    const _parentLinks = (_parentVM._getModelNode(_parentVM.modelPS, 'portalLinks')?.map) || new Map();
+    portals.map.forEach(function(_portal) {
+        [..._parentLinks.values()].forEach(function(lk) {
+            if (lk.toSelo !== _vm2.seloId || lk.toPortalName !== _portal.name) return;
+            _parentVM.injectModelMessage('_moveLinkPortal', { linkId: lk.id, x: _portal.x || 0, y: _portal.y || 0 }, _vm2.seloId);
+        });
+    });
+    return null;
+});
+const _notifyLinkedMirror = Behaviors.collect(null, Events.change(portalLinks), (_, __) => {
+    if (!app.vm) return null;
+    const _vm2 = app.vm, _parentVM = _vm2._parent;
+    if (!_parentVM) return null;
+    const _parentLinks = (_parentVM._getModelNode(_parentVM.modelPS, 'portalLinks')?.map) || new Map();
+    const _myLinks = (portalLinks && portalLinks.map) || new Map();
+    [..._parentLinks.values()].forEach(function(lk) {
+        if (lk.toSelo !== _vm2.seloId) return;
+        const _hasMirror = [..._myLinks.values()].some(function(l) { return l.toSelo === _parentVM.seloId; });
+        _parentVM.injectModelMessage('_setLinkMirror', { linkId: lk.id, hasMirror: _hasMirror }, _vm2.seloId);
+    });
+    return null;
+});
 
 // portalText — synced portal bar input value; snapshotted so joiners restore it.
 const setPortal  = Events.receiver();
 const portalText = Behaviors.collect('', setPortal,
     function(_, ev) { return (ev && typeof ev === 'object') ? (ev.value || '') : (ev || ''); });
 
-// ── VIEW nodes: local per-client ──────────────────────────────────────────
-// (provided by the VIEW_PROGRAM)
-`,
-    viewProgram: `
-
-// ── Model state receivers ─────────────────────────────────────────────────
-// These receive values pushed by VM after each model drain (via modelStateKeys).
-const windows      = Behaviors.collect({map: new Map()}, Events.receiver(), function(_,v){return v||{map: new Map()};});
-const portals      = Behaviors.collect({map: new Map()}, Events.receiver(), function(_,v){return v||{map: new Map()};});
-const portalLinks  = Behaviors.collect({map: new Map()}, Events.receiver(), function(_,v){return v||{map: new Map()};});
-const portalText   = Behaviors.collect('', Events.receiver(), function(_, v) { return v || ''; });
+/// ── VIEW nodes: local per-client ──────────────────────────────────────────
+// windows, portalText — auto-generated as cross-boundary receivers by krestianify
 
 // ── buildUI — create title strip once ────────────────────────────────────
 // Runs once: when rootEl is available and title strip not yet present.
-// Creates .vm-clock, .vm-peers, .vm-queue so the renderer can update them.
+// For child windows (createSeloContainer already has .vm-clock in titleBar),
+// wires _clockEl/_peersEl to those spans instead of creating a second strip.
 const _buildUI = Behaviors.collect(false, Events.once(vTime), function(done, _) {
-console.log('buildUI timer fired', { done, rootEl, vTime });
     if (done) return true;
     var rEl = rootEl;
-    if (!rEl || rEl.querySelector('.vm-clock')) return true;
+    if (!rEl) return false;
 
-    // Inject avatar + vm CSS so blank-joiner gets styles without a <style> block
     if (UI && UI.injectStyles) UI.injectStyles();
-    var strip = document.createElement('div');
-    strip.style.cssText =
-        'position:absolute;top:0;left:0;right:0;height:22px;' +
-        'background:rgba(232,232,244,0.80);border-bottom:1px solid #ccd;' +
-        'display:flex;align-items:center;padding:0 6px;gap:4px;' +
-        'font-size:11px;font-family:monospace;color:#446;z-index:5;user-select:none;';
-    var lbl = document.createElement('b');
-    lbl.className = 'vm-label';
-    lbl.textContent = Renkon.app.seloId || '';
-    lbl.style.cssText = 'flex:0 0 auto;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-    var stats = document.createElement('span');
-    stats.style.cssText = 'margin-left:auto;font-size:10px;font-weight:normal;color:#888;white-space:nowrap;';
-    stats.innerHTML = 'T:<span class="vm-clock">0</span> P:<span class="vm-peers">0</span>';
-    strip.appendChild(lbl);
-    strip.appendChild(stats);
-    rEl.appendChild(strip);
-    rEl._stripEl = strip;
-    rEl._clockEl = stats.querySelector('.vm-clock');
-    rEl._peersEl = stats.querySelector('.vm-peers');
-    // Don't touch rEl.style.cssText — host page CSS handles layout.
-    // Just ensure it's focusable.
+
+    // Every VM owns its stats bar (top) and portal bar (bottom) inside its rootEl.
+    // Root VM rootEl = full page div. Child VM rootEl = vm-content (below parent titleBar).
+    var tbResult = UI.createVMTitleBar(rEl, { name: Renkon.app.seloId || '', height: 18, draggable: false, showStats: true });
+    rEl._stripEl = tbResult.bar;
+    rEl._clockEl = tbResult.clockEl;
+    rEl._peersEl = tbResult.peersEl;
+
+    var depth    = Renkon.app.depth    || 0;
+    var maxDepth = Renkon.app.maxDepth != null ? Renkon.app.maxDepth : 5;
+    var atMax    = depth >= maxDepth;
+    var _pbResult = UI.createPortalBar(rEl, {
+        disabled: atMax,
+        onInput: atMax ? null : function(value) { send('setPortal', { value: value }); },
+        onSubmit: atMax ? null : function(inputVal) {
+            var parsed = _parsePortalInput(inputVal);
+            if (parsed.action === 'createPortal') {
+                send('createPortal', { name: parsed.portalName });
+            } else if (parsed.action === 'createLink') {
+                var _liveVM = Renkon.app && Renkon.app.vm;
+                var _livePortalNode = _liveVM && _liveVM._getModelNode(_liveVM.modelPS, 'portals');
+                var _localPortals = (_livePortalNode && _livePortalNode.map) || new Map();
+                var _fromPortal = null;
+                [..._localPortals.values()].forEach(function(p) { if (p.name === parsed.fromPortalName) _fromPortal = p; });
+                if (_fromPortal) send('createLink', { fromPortalId: _fromPortal.id, toSelo: parsed.toSelo, toPortalName: parsed.toPortalName, maxDepth: parsed.maxDepth });
+                else console.warn('[createLink] portal not found:', parsed.fromPortalName, 'available:', [..._localPortals.values()].map(function(p){return p.name;}));
+            } else {
+                send('spawnSelo', { seloId: parsed.seloId, appName: parsed.appName || null, maxDepth: parsed.maxDepth });
+            }
+        },
+    });
+    rEl._portalBar = _pbResult.bar;
+    rEl._portalInp = _pbResult.input;
+
     if (!rEl.getAttribute('tabindex')) rEl.setAttribute('tabindex', '-1');
     return true;
 });
 
-// ── onSpawn wiring — set up child VM portal windows ───────────────────────
-// Renkon.app.vm is the KrestianstvoVM instance.
-// We set vm.onSpawn once so child VMs get portal containers.
+// ── _makeSpawnHandler — factory for spawn/close/join VM window handlers ──
+const _makeSpawnHandler = function(parentEl, parentVM) {
+    return function(opts) {
+        var childVM      = opts.vm;
+        var targetSeloId = childVM.seloId;
+        var windowName   = opts.name;  // windowName passed directly from _diffChildren
+
+        const _existing = [...parentEl.children].some(function(c) { return c.dataset?.seloId === windowName; });
+        if (_existing) return;
+
+        var result = UI.createSeloContainer(windowName, parentEl, {
+            onMove:   function(n, x, y) { send('_moveWindow',   { name: n, x: x, y: y }); },
+            onResize: function(n, w, h) { send('_resizeWindow', { name: n, w: w, h: h }); },
+            onRotate: function(n, r)    { send('_rotateWindow', { name: n, r: r }); },
+            onClose:  function(n)       { send('_closeWindow',  { name: n }); },
+        });
+        var el   = result.el;
+        var cinp = result.cinp;
+        var cbtn = result.cbtn;
+
+        var lbl0 = el.querySelector('.vm-label');
+        if (lbl0) lbl0.textContent = targetSeloId;
+        cinp.value = targetSeloId;
+
+        var _wp = parentVM.viewPS && parentVM.viewPS.app && parentVM.viewPS.app.windowPositions;
+        var savedPos = _wp && (_wp instanceof Map ? _wp.get(windowName) : _wp[windowName]);
+        if (savedPos) {
+            if (savedPos.x != null) el.style.left = savedPos.x + 'px';
+            if (savedPos.y != null) el.style.top  = savedPos.y + 'px';
+            if (savedPos.w != null) el.style.width  = savedPos.w + 'px';
+            if (savedPos.h != null) el.style.height = savedPos.h + 'px';
+            if (savedPos.r != null) el.style.transform = 'rotate(' + savedPos.r + 'deg)';
+        }
+
+        // z-index from spawned position — deterministic across peers regardless of
+        // network-arrival order. _childrenMap preserves spawned array order.
+        if (parentVM._childrenMap) {
+            var _zKeys = [...parentVM._childrenMap.keys()];
+            var _zIdx  = _zKeys.indexOf(windowName);
+            if (_zIdx >= 0) el.style.zIndex = 20 + _zIdx;
+        }
+
+        if (childVM._isPortal) {
+            el.classList.add('kv-portal-window');
+            if (childVM._linkId) el.classList.add('kv-link-window');
+        }
+
+        // The window chrome (titleBar, handles, border) is parent VM UI.
+        // The child VM renders only in the content area below the titleBar.
+        // Create vm-content BEFORE any DOM insertion so viewAppExtra is set
+        // before MutationObserver callbacks fire.
+        var _vmContent = document.createElement('div');
+        _vmContent.className = 'vm-content';
+        var _tbH = result.titleBar.offsetHeight || 22;
+        _vmContent.style.cssText = 'position:absolute;top:' + _tbH + 'px;left:0;right:0;bottom:0;overflow:hidden;';
+
+        // Set rootEl on child VM before appending to DOM — ensures MutationObserver
+        // in _rebuildViewPSWhenReady finds rootEl already set when it fires.
+        if (childVM.viewPS && childVM.viewPS.app) {
+            childVM.viewPS.app.rootEl = _vmContent;
+            childVM.viewPS.app.UI     = UI;
+        }
+        childVM.viewAppExtra = Object.assign(childVM.viewAppExtra || {}, { rootEl: _vmContent, UI: UI });
+
+        el.appendChild(_vmContent);
+        el.addEventListener('mouseenter', function() { Renkon.app._activeWS = childVM.ws; });
+        el.addEventListener('mousedown',  function(e) {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
+            Renkon.app._activeWS = childVM.ws;
+        });
+
+        childVM.onSeloJoined = function(info) {
+            var lbl = el.querySelector('.vm-label');
+            if (lbl) lbl.textContent = info.seloId;
+            cinp.value = info.seloId;
+        };
+
+        // Grandchild containers are appended to _vmContent (child VM's rootEl).
+        childVM.onSpawn = _makeSpawnHandler(_vmContent, childVM);
+        childVM.onClose = function(closeOpts) {
+            const childEl = [..._vmContent.children].find(function(c) { return c.dataset?.seloId === closeOpts.name; });
+            if (childEl) { childEl._destroyDrag?.(); childEl.remove(); }
+        };
+
+        cbtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var newSeloId = cinp.value.trim();
+            if (!newSeloId) return;
+            send('_joinWindow', { name: windowName, seloId: newSeloId });
+        });
+
+        el._onSpawnSelo = function(inputVal) {
+            var parsed = _parsePortalInput(inputVal);
+            if (childVM.ws && childVM.ws.readyState === WebSocket.OPEN)
+                childVM.ws.send(JSON.stringify({ type: 'spawnSelo', data: { seloId: parsed.seloId, appName: parsed.appName || null, maxDepth: parsed.maxDepth } }));
+        };
+    };
+};
+
+// ── onSpawn wiring — wire vm.onSpawn once using _makeSpawnHandler ──────────
 const _spawnWired = Behaviors.collect(false, Events.once(vTime), function(done, _) {
     if (done) return true;
-    var vm = Renkon.app.vm;
+    var vm  = Renkon.app.vm;
     var app = Renkon.app;
     if (!vm || !UI) return false;
 
-    function makeSpawnHandler(parentEl, parentVM) {
-        return function(opts) {
-            var childVM    = opts.vm;
-            var targetSeloId = childVM.seloId;   // actual seloId the child connected to
-            // Look up the DOM windowName key from _childrenMap (Map<windowName, childVM>)
-            var windowName = opts.name;
-            if (parentVM._childrenMap) {
-                parentVM._childrenMap.forEach(function(vm, wName) {
-                    if (vm === childVM) windowName = wName;
-                });
-            }
-
-            const _existing = [...parentEl.children].some(child => child.dataset?.seloId === windowName);
-            if (_existing) return;
-            
-            var ws = parentVM.ws;
-            // createSeloContainer uses windowName as data-selo-id (unique DOM key)
-            // but shows targetSeloId as the label and cinp default value
-            var result = UI.createSeloContainer(windowName, parentEl, {
-                onMove: function(n, x, y) {
-                    if (ws && ws.readyState === WebSocket.OPEN)
-                        ws.send(JSON.stringify({ type: '_moveWindow', data: { name: n, x: x, y: y } }));
-                },
-                onResize: function(n, w, h) {
-                    if (ws && ws.readyState === WebSocket.OPEN)
-                        ws.send(JSON.stringify({ type: '_resizeWindow', data: { name: n, w: w, h: h } }));
-                },
-                onRotate: function(n, r) {
-                    if (ws && ws.readyState === WebSocket.OPEN)
-                        ws.send(JSON.stringify({ type: '_rotateWindow', data: { name: n, r: r } }));
-                },
-                onClose: function(n) {
-                    if (ws && ws.readyState === WebSocket.OPEN)
-                        ws.send(JSON.stringify({ type: '_closeWindow', data: { name: n } }));
-                },
-            });
-            var el   = result.el;
-            var cinp = result.cinp;
-            var cbtn = result.cbtn;
-
-            // Show the actual seloId in the label and join input, not the window name
-            var lbl0 = el.querySelector('.vm-label');
-            if (lbl0) lbl0.textContent = targetSeloId;
-            cinp.value = targetSeloId;
-
-            var _wp = parentVM.viewPS && parentVM.viewPS.app && parentVM.viewPS.app.windowPositions;
-            var savedPos = _wp && (_wp instanceof Map ? _wp.get(windowName) : _wp[windowName]);
-            if (savedPos) {
-                if (savedPos.x != null) el.style.left = savedPos.x + 'px';
-                if (savedPos.y != null) el.style.top  = savedPos.y + 'px';
-                if (savedPos.w != null) el.style.width  = savedPos.w + 'px';
-                if (savedPos.h != null) el.style.height = savedPos.h + 'px';
-                if (savedPos.r != null) el.style.transform = 'rotate(' + savedPos.r + 'deg)';
-            }
-
-            if (childVM.viewPS && childVM.viewPS.app) {
-                childVM.viewPS.app.rootEl = el;
-                childVM.viewPS.app.UI     = UI;
-            }
-            childVM.viewAppExtra = Object.assign(childVM.viewAppExtra || {}, {
-                rootEl: el, UI: UI,
-            });
-
-            // Tag portal windows for CSS hiding of nested portals
-            if (childVM._isPortal) {
-                el.classList.add('kv-portal-window');
-                // Link windows get extra class to distinguish from auto-paired portals
-                if (childVM._linkId) el.classList.add('kv-link-window');
-                // Pre-create .vm-content so world:2 renders inside it (not directly in el).
-                // _portalLinkSync offsets .vm-content to slide the viewport.
-                // Also ensures _buildUI guard (.vm-clock found in titlebar) works correctly.
-                var _pvc = document.createElement('div');
-                _pvc.className = 'vm-content';
-                _pvc.style.cssText = 'position:absolute;top:30px;left:0;right:0;bottom:0;overflow:hidden;';
-                el.appendChild(_pvc);
-                // Point child VM rootEl at .vm-content so world:2 renders there
-                childVM.viewAppExtra = Object.assign(childVM.viewAppExtra || {}, {
-                    rootEl: _pvc, UI: UI,
-                });
-            }
-            el.addEventListener('mouseenter', function() { app._activeWS = childVM.ws; });
-            el.addEventListener('mousedown',  function(e) {
-                if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
-                app._activeWS = childVM.ws;
-            });
-
-            childVM.onSeloJoined = function(info) {
-                var lbl = el.querySelector('.vm-label');
-                if (lbl) lbl.textContent = info.seloId;
-                cinp.value = info.seloId;
-            };
-
-            childVM.onSpawn = makeSpawnHandler(el, childVM);
-            childVM.onClose = function(closeOpts) {
-                // Convert HTMLCollection to Array and find the matching child
-                const childEl = [...el.children].find(child => 
-                    child.dataset?.seloId === closeOpts.name
-                );
-                // If found, execute cleanup and remove
-                if (childEl) {
-                    childEl._destroyDrag?.(); 
-                    childEl.remove();
-                }
-            };
-
-            // Join button — re-joins via parent model so all peers update together
-            cbtn.addEventListener('click', function(e) {
-                e.stopPropagation();
-                var newSeloId = cinp.value.trim();
-                if (!newSeloId) return;
-                if (ws && ws.readyState === WebSocket.OPEN)
-                    ws.send(JSON.stringify({ type: '_joinWindow', data: { name: windowName, seloId: newSeloId } }));
-            });
-
-            // Portal bar inside child window — spawn grandchildren
-            el._onSpawnSelo = function(inputVal) {
-                var parsed = _parsePortalInput(inputVal);
-                if (childVM.ws && childVM.ws.readyState === WebSocket.OPEN)
-                    childVM.ws.send(JSON.stringify({ type: 'spawnSelo', data: { seloId: parsed.seloId, appName: parsed.appName || null, maxDepth: parsed.maxDepth } }));
-            };
-        };
+    vm.onSpawn = _makeSpawnHandler(app.rootEl, vm);
+    // Flush children that were spawned before onSpawn was available (model
+    // evaluates before view's first tick). Creates DOM slots in _childrenMap order
+    // = spawned array order = historical creation order on all peers.
+    if (vm._childrenMap) {
+        vm._childrenMap.forEach(function(childVM, wName) {
+            vm.onSpawn({ name: wName, vm: childVM, depth: childVM.depth, placeholder: true });
+        });
     }
-
-    vm.onSpawn = makeSpawnHandler(app.rootEl, vm);
     vm.onClose = function(opts) {
         var rEl = app.rootEl;
         if (!rEl) return;
-
-         // Convert HTMLCollection to Array and find the matching child
-                const childEl = [...rEl.children].find(child => 
-                    child.dataset?.seloId === opts.name
-                );
-                // If found, execute cleanup and remove
-                if (childEl) {
-                    childEl._destroyDrag?.(); 
-                    childEl.remove();
-                }
+        const childEl = [...rEl.children].find(child => child.dataset?.seloId === opts.name);
+        if (childEl) { childEl._destroyDrag?.(); childEl.remove(); }
     };
 
-    // Mouse/touch tracking — route to correct VM on enter/click
     var rEl = app.rootEl;
     if (rEl) {
         rEl.addEventListener('mouseenter',  function() { window._krestiansvoActiveWS = app.ws; });
@@ -954,15 +788,18 @@ const _spawnWired = Behaviors.collect(false, Events.once(vTime), function(done, 
 });
 
 // ── Input / move events ───────────────────────────────────────────────────
-function _clickHandler(e) {
+const _clickHandler = function(e) {
     var rEl = Renkon.app && Renkon.app.rootEl;
     if (!rEl || !rEl.contains(e.target)) return undefined;
     var hit = e.target.closest('[data-selo-id]');
     // hit may be rEl itself OR rEl's parent portal container (when rEl is .vm-content)
     if (hit && hit !== rEl && hit !== rEl.parentElement) return undefined;
-    // Don't steal focus from INPUT or BUTTON elements (e.g. portal bar)
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return undefined;
-    rEl.focus({ preventScroll: true });
+    // Only steal focus on explicit click/touch — never on mousemove (would blur portal input)
+    if (e.type === 'click' || e.type === 'touchstart') {
+        if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'BUTTON') {
+            rEl.focus({ preventScroll: true });
+        }
+    }
     // Measure coords relative to avatar layer so cursor center matches avatar center.
     // Search only direct children to avoid finding nested portal layers.
 
@@ -989,10 +826,9 @@ function _clickHandler(e) {
         var _p = _inv.transformPoint(new window.DOMPoint(rx - _ox, ry - _oy));
         rx = _p.x + _ox; ry = _p.y + _oy;
     }
-    // Subtract avatar layer's top offset (title-bar height) to stay in layer-local coords
-    var _layerTop = (_layer && _layer.offsetTop) || 0;
+    var _layerTop = (_layer && _layer.offsetTop) || 0;  // always 0; layer covers full rootEl
     return { x: Math.round(rx), y: Math.round(ry - _layerTop) };
-}
+};
 const _clickDoc = Events.or(
     Events.listener(document, 'click',      _clickHandler),
     Events.listener(document, 'touchstart', _clickHandler)
@@ -1005,9 +841,7 @@ const _timerMove  = Events.timer((Renkon.app.depth || 0) > 7 ? 50 * (1 + Math.ma
 const _mouseCoords = {t: _timerMove, e: _moveDoc};
 const _sendMove = Behaviors.collect(null, Events.or(_mouseCoords, _clickDoc), function(_, pos) {
     if (!pos) return null;
-    var ws = Renkon.app.ws;
-    if (ws && ws.readyState === WebSocket.OPEN)
-        ws.send(JSON.stringify({ type: '_move', data: pos.e }));
+    send('_move', pos.e);
     return null;
 });
 
@@ -1015,13 +849,15 @@ const _sendMove = Behaviors.collect(null, Events.or(_mouseCoords, _clickDoc), fu
 // ''        → spawn new child with auto-generated name
 // 'new:foo' → spawn new child named 'foo' (fresh empty selo)
 // 'foo'     → open portal window connecting to existing selo 'foo'
-function _parsePortalInput(inputVal) {
+const _parsePortalInput = function(inputVal) {
     var v = (inputVal || '').trim();
     if (!v) return { seloId: '', appName: null, maxDepth: null, isPortal: false };
     // Parse trailing options: ":d=5" sets maxDepth
     var maxDepth = null;
-    var _dMatch = v.match(/:d=(\d+)$/);
-    if (_dMatch) { maxDepth = parseInt(_dMatch[1], 10); v = v.slice(0, v.lastIndexOf(':d=')).trim(); }
+    // var _dMatch = v.match(/:d=(\d+)$/);
+    // if (_dMatch) { maxDepth = parseInt(_dMatch[1], 10); v = v.slice(0, v.lastIndexOf(':d=')).trim(); }
+    var _dIdx = v.lastIndexOf(':d='); if (_dIdx >= 0) { var _dVal = v.slice(_dIdx + 3); if (_dVal && !isNaN(parseInt(_dVal, 10))) { maxDepth = parseInt(_dVal, 10); v = v.slice(0, _dIdx).trim(); } }
+
     // "portal:p1" — create a named portal rect in this selo
     if (v.indexOf('portal:') === 0) {
         var _pname = v.slice(7).trim();
@@ -1056,7 +892,7 @@ function _parsePortalInput(inputVal) {
     // the full portal/avatar infrastructure. Joining an existing session is
     // unaffected: the snapshot arrives and programs are restored from it.
     return { seloId: v, appName: 'world', maxDepth: maxDepth, isPortal: false };
-}
+};
 
 
 // ── renderer — 60hz DOM update ────────────────────────────────────────────
@@ -1066,7 +902,6 @@ const renderer = Behaviors.collect(null, renderTick, function(_, __) {
     if (!rEl || !UI) return null;
     var objs    = (objects && objects.map) || new Map();
     var myId    = clientIdentity && clientIdentity.clientId;
-    var ws      = Renkon.app.ws;
     var depth    = Renkon.app.depth    || 0;
     var maxDepth = Renkon.app.maxDepth != null ? Renkon.app.maxDepth : 5;
     var atMax    = depth >= maxDepth;
@@ -1077,50 +912,6 @@ const renderer = Behaviors.collect(null, renderTick, function(_, __) {
     if (peersEl) peersEl.textContent = objs.size;
 
     var portalBar = rEl._portalBar;
-
-    if (!portalBar) {
-    var _pbResult = UI.createPortalBar(rEl, {
-        disabled: atMax,
-        onInput: atMax ? null : function(value) {
-            if (ws && ws.readyState === WebSocket.OPEN)
-                ws.send(JSON.stringify({ type: 'setPortal', data: { value: value } }));
-        },
-        onSubmit: atMax ? null : function(inputVal) {
-            if (!ws || ws.readyState !== WebSocket.OPEN) return;
-            var parsed = _parsePortalInput(inputVal);
-            if (parsed.action === 'createPortal') {
-                ws.send(JSON.stringify({ type: 'createPortal', data: {
-                    name: parsed.portalName,
-                }}));
-            } else if (parsed.action === 'createLink') {
-                // Resolve local portal id from name.
-                // Use Renkon.app._portalState (set by _exposePortalState) since
-                // portals behavior is not in scope inside the renderer closure.
-                var _localPortals = (Renkon.app && Renkon.app._portalState) || new Map();
-                var _fromPortal = null;
-                ;[..._localPortals.values()].forEach(function(p) {
-                    if (p.name === parsed.fromPortalName) _fromPortal = p;
-                });
-                if (_fromPortal && ws && ws.readyState === 1) {
-                    ws.send(JSON.stringify({ type: 'createLink', data: {
-                        fromPortalId:  _fromPortal.id,
-                        toSelo:        parsed.toSelo,
-                        toPortalName:  parsed.toPortalName,
-                        maxDepth:      parsed.maxDepth,
-                    }}));
-                } else if (!_fromPortal) {
-                    console.warn('[portal] local portal not found:', parsed.fromPortalName,
-                        'available:', [..._localPortals.values()].map(function(p){return p.name;}));
-                }
-            } else {
-                ws.send(JSON.stringify({ type: 'spawnSelo', data: { seloId: parsed.seloId, appName: parsed.appName || null, maxDepth: parsed.maxDepth } }));
-            }
-        },
-    });
-    portalBar = _pbResult.bar;
-    rEl._portalBar = portalBar;
-    rEl._portalInp = _pbResult.input;
-};
 
     var portalInp = rEl._portalInp;
     if (portalInp && !atMax && document.activeElement !== portalInp) {
@@ -1135,16 +926,10 @@ const renderer = Behaviors.collect(null, renderTick, function(_, __) {
         layer = document.createElement('div');
         layer.className = 'vm-avatar-layer';
         layer._avatarMap = new Map();
-        // Top offset = height of stats strip if directly inside rEl
-        var _topOff = rEl._stripEl ? (rEl._stripEl.offsetHeight || 22) : 0;
-        // bottom:36px reserved for portal bar — but in portal viewports the contentEl
-        // can be 400vh tall, making the layer huge and avatars render far offscreen.
-        // Use overflow:hidden on the parent to clip instead.
-        var _isPortalContent = rEl.classList && rEl.classList.contains('vm-content') &&
-            rEl.parentElement && rEl.parentElement.classList.contains('kv-portal-window');
-        var _bottom = _isPortalContent ? '0px' : '44px'; // portal bar ~40px
+        // Avatar layer covers the full rootEl — stats bar and portal bar are world app
+        // elements inside rootEl; z-index:9999 renders avatars on top of both.
         layer.style.cssText =
-            'position:absolute;top:' + _topOff + 'px;left:0;right:0;bottom:' + _bottom + ';' +
+            'position:absolute;top:0;left:0;right:0;bottom:0;' +
             'pointer-events:none;overflow:hidden;z-index:9999;';
         rEl.appendChild(layer);
         rEl._avatarLayer = layer;
@@ -1205,22 +990,12 @@ const _avatarLeftSync = Behaviors.collect(null, Events.change(clientLeft), funct
     return null;
 });
 
-// ── _exposePortalState — share portals with parent VM ────────────────────
-const _exposePortalState = Behaviors.collect(null,
-    Events.or(Events.change(portals), Events.change(portalLinks)),
-    function(_, __) {
-        if (Renkon.app) {
-            Renkon.app._portalState       = (portals      && portals.map)      || new Map();
-            Renkon.app._portalLinksState  = (portalLinks  && portalLinks.map)  || new Map();
-        }
-        return null;
-    }
-);
+
 
 // ── _attachGesture — unified mouse+touch drag helper ─────────────────────
 // Attaches mousedown/touchstart to el; calls onStart(cx,cy), onMove(cx,cy),
 // onEnd(cx,cy) during drag. opts.filter(e) can veto the gesture start.
-function _attachGesture(el, onStart, onMove, onEnd, opts) {
+const _attachGesture = function(el, onStart, onMove, onEnd, opts) {
     var filter = opts && opts.filter;
     function _mm(e) { onMove(e.clientX, e.clientY); }
     function _mu(e) {
@@ -1248,7 +1023,7 @@ function _attachGesture(el, onStart, onMove, onEnd, opts) {
         document.addEventListener('touchmove', _tm, { passive: false });
         document.addEventListener('touchend', _tu);
     }, { passive: false });
-}
+};
 
 // ── _portalRectSync — draggable portal viewport rectangles ────────────────
 // Each portal is a named dashed rectangle. Moving it shifts the viewport
@@ -1256,7 +1031,6 @@ function _attachGesture(el, onStart, onMove, onEnd, opts) {
 const _portalRectSync = Behaviors.collect(null, Events.change(portals), function(_, _pts) {
     if (!rootEl) return null;
     var pts = (_pts && _pts.map) || new Map();
-    var ws  = Renkon.app.ws;
     var rEl = rootEl;
 
     // Remove stale rects
@@ -1298,8 +1072,7 @@ const _portalRectSync = Behaviors.collect(null, Events.change(portals), function
                 'font-size:11px;line-height:12px;cursor:pointer;padding:0;z-index:2;';
             _cb.addEventListener('click', function(e) {
                 e.stopPropagation();
-                if (ws && ws.readyState === 1)
-                    ws.send(JSON.stringify({ type: 'closePortal', data: { id: pid } }));
+                send('closePortal', { id: pid });
             });
             rect.appendChild(_cb);
 
@@ -1317,12 +1090,12 @@ const _portalRectSync = Behaviors.collect(null, Events.change(portals), function
                         if (!_scaling) return;
                         var now=Date.now(); if (now-_last<50) return; _last=now;
                         var s=Math.max(0.1,Math.round((_startScale+(cy-_startY)/100)*100)/100);
-                        if (ws&&ws.readyState===1) ws.send(JSON.stringify({type:'scalePortal',data:{id:_pid,s:s}}));
+                        send('scalePortal', {id:_pid,s:s});
                     },
                     function(_, cy) {
                         if (!_scaling) return; _scaling=false;
                         var s=Math.max(0.1,Math.round((_startScale+(cy-_startY)/100)*100)/100);
-                        if (ws&&ws.readyState===1) ws.send(JSON.stringify({type:'scalePortal',data:{id:_pid,s:s}}));
+                        send('scalePortal', {id:_pid,s:s});
                     }
                 );
             })(pid);
@@ -1341,11 +1114,11 @@ const _portalRectSync = Behaviors.collect(null, Events.change(portals), function
                     function(cx, cy) {
                         if (!_rsz) return;
                         var now=Date.now(); if (now-_last<50) return; _last=now;
-                        if (ws&&ws.readyState===1) ws.send(JSON.stringify({type:'resizePortal',data:{id:_pid,w:Math.round(Math.max(80,_sw+cx-_sx)),h:Math.round(Math.max(60,_sh+cy-_sy))}}));
+                        send('resizePortal', {id:_pid,w:Math.round(Math.max(80,_sw+cx-_sx)),h:Math.round(Math.max(60,_sh+cy-_sy))});
                     },
                     function(cx, cy) {
                         if (!_rsz) return; _rsz=false;
-                        if (ws&&ws.readyState===1) ws.send(JSON.stringify({type:'resizePortal',data:{id:_pid,w:Math.round(Math.max(80,_sw+cx-_sx)),h:Math.round(Math.max(60,_sh+cy-_sy))}}));
+                        send('resizePortal', {id:_pid,w:Math.round(Math.max(80,_sw+cx-_sx)),h:Math.round(Math.max(60,_sh+cy-_sy))});
                     }
                 );
             })(pid);
@@ -1369,12 +1142,12 @@ const _portalRectSync = Behaviors.collect(null, Events.change(portals), function
                         if (!_rotating) return;
                         var now=Date.now(); if (now-_last<50) return; _last=now;
                         var r=Math.round(_startR+_rawAngle(cx,cy)-_startAngle);
-                        if (ws&&ws.readyState===1) ws.send(JSON.stringify({type:'rotatePortal',data:{id:_pid,r:r}}));
+                        send('rotatePortal', {id:_pid,r:r});
                     },
                     function(cx, cy) {
                         if (!_rotating) return; _rotating=false;
                         var r=Math.round(_startR+_rawAngle(cx,cy)-_startAngle);
-                        if (ws&&ws.readyState===1) ws.send(JSON.stringify({type:'rotatePortal',data:{id:_pid,r:r}}));
+                        send('rotatePortal', {id:_pid,r:r});
                     }
                 );
             })(pid);
@@ -1388,11 +1161,11 @@ const _portalRectSync = Behaviors.collect(null, Events.change(portals), function
                     function(cx, cy) {
                         if (!_drag) return;
                         var now=Date.now(); if (now-_last<50) return; _last=now;
-                        if (ws&&ws.readyState===1) ws.send(JSON.stringify({type:'movePortal',data:{id:_pid,x:Math.round(_ox+cx-_mx),y:Math.round(_oy+cy-_my)}}));
+                        send('movePortal', {id:_pid,x:Math.round(_ox+cx-_mx),y:Math.round(_oy+cy-_my)});
                     },
                     function(cx, cy) {
                         if (!_drag) return; _drag=false;
-                        if (ws&&ws.readyState===1) ws.send(JSON.stringify({type:'movePortal',data:{id:_pid,x:Math.round(_ox+cx-_mx),y:Math.round(_oy+cy-_my)}}));
+                        send('movePortal', {id:_pid,x:Math.round(_ox+cx-_mx),y:Math.round(_oy+cy-_my)});
                     },
                     { filter: function(e) { return e.target === rect || e.target === lbl; } }
                 );
@@ -1438,7 +1211,7 @@ const _portalRectSync = Behaviors.collect(null, Events.change(portals), function
 // This VIEW node sizes the window to match the local portal rect,
 // and offsets the inner content so toPortal's position aligns with (0,0).
 const _portalLinkSync = Behaviors.collect(null,
-    Events.or(Events.change(portalLinks), Events.change(portals), Events.change(objects), Events.change(vTime)),
+    Events.or(Events.change(portalLinks), Events.change(portals)),
     function(_, __) {
         var lks  = (portalLinks  && portalLinks.map)  || new Map();
         var pts  = (portals      && portals.map)      || new Map();
@@ -1482,9 +1255,7 @@ const _portalLinkSync = Behaviors.collect(null,
                         e.preventDefault();
                         // deleteLink: model removes spawned entry → _diffChildren
                         // closes child VM → onClose removes window DOM
-                        var _ws = Renkon.app.ws;
-                        if (_ws && _ws.readyState === 1)
-                            _ws.send(JSON.stringify({ type: 'deleteLink', data: { id: lid } }));
+                        send('deleteLink', { id: lid });
                     });
                 }
             }
@@ -1499,16 +1270,10 @@ const _portalLinkSync = Behaviors.collect(null,
                 contentEl = winEl;
             }
 
-            // Read toPortal position from remote VM's exposed state
-            var remotePortals = (childVM.viewPS && childVM.viewPS.app &&
-                                  childVM.viewPS.app._portalState) || new Map();
-            var toPortal = [...remotePortals.values()].find(function(p) {
-                return p.name === lk.toPortalName;
-            });
-            // Offset: move content so toPortal's top-left aligns with window origin.
-            // toPortal moves right → offset goes more negative → content slides left.
-            var offX = toPortal ? -(toPortal.x || 0) : 0;
-            var offY = toPortal ? -(toPortal.y || 0) : 0;
+            // Offset from link entry — seeded by _notifyLinkedPortalPos on first portals change,
+            // then kept current by _notifyLinkedMove on every movePortal.
+            var offX = -(lk.x || 0);
+            var offY = -(lk.y || 0);
 
             // Window resize is now handled by _notifyLinkedResize future chain
             // in world:2's model → injectModelMessage into world:1's model.
@@ -1519,7 +1284,7 @@ const _portalLinkSync = Behaviors.collect(null,
             // overlap (toPortal rect overlaps with fromPortal in viewport coords),
             // activate mirror by showing the nested link window content.
             // maxDepth prevents infinite recursion — mirror runs for finite depth only.
-            if (fromPortal && toPortal) {
+            if (fromPortal && lk.toPortalName) {
                 var _mirrorCssId = 'kv-mirror-active-css';
                 if (!document.getElementById(_mirrorCssId)) {
                     var _ms = document.createElement('style');
@@ -1534,14 +1299,9 @@ const _portalLinkSync = Behaviors.collect(null,
                 // fromPortal defines the clip size (w,h).
                 // Any portal rect in world:2 that falls within that region causes overlap.
                 // Simple heuristic: if a remote link window exists pointing to our selo,
-                // check if its fromPortal rect is within the clipped view.
-                var _remotePLinks = (childVM.viewPS && childVM.viewPS.app &&
-                                    childVM.viewPS.app._portalLinksState) || new Map();
-                var _hasReverseLink = [..._remotePLinks.values()].some(function(l) {
-                    return l.toSelo === Renkon.app.seloId;
-                });
-                // Mirror is active only if reverse link exists AND depth allows it
-                var _mirrorActive = _hasReverseLink && childVM.depth < childVM.maxDepth;
+                // Mirror is active only if reverse link exists (pushed reactively via _notifyLinkedMirror)
+                // AND depth allows it.
+                var _mirrorActive = lk.hasMirror && childVM.depth < childVM.maxDepth;
                 if (_mirrorActive) {
                     winEl.classList.add('kv-mirror-active');
                 } else {
@@ -1601,8 +1361,6 @@ const _winSync = Behaviors.collect(null, Events.change(windows), function(_, _wi
     return null;
 });
 `,
-    // buildUI is null — VIEW_PROGRAM's _buildUI Renkon node handles DOM setup
-    buildUI: null,
 };
 
 
@@ -1629,96 +1387,17 @@ const _winSync = Behaviors.collect(null, Events.change(windows), function(_, _wi
 //   selo.html?k=portal-minimal:a   — source (links to :b, shows sliding window)
 //   selo.html?k=portal-minimal:b   — target (ticking position, updates portal)
 APPS["portal-minimal"] = {
-    modelNodes: ['createPortal', 'updatePortal', 'createLink', 'portals', 'portalLinks', 'spawned', '_autoSetup', '_tick', '_tickLoop'],
+    // portals, portalLinks, spawned, createPortal, createLink etc. provided by VM preamble.
+    // Uses flat portal schema: { id, name, offset } — portal_update merges props directly.
+    modelNodes: ['_autoSetup', '_tick', '_tickLoop'],
     app: `
-// portals — Behaviors.select: pure FRP. createPortal/updatePortal handled by FRP + VM preamble.
-const createPortal = Events.receiver();
-const updatePortal = Events.receiver();
-const createLink   = Events.receiver();
-const portals = Behaviors.select(
-    { map: new Map() },
-    Events.once(worldState), function(prev, s) {
-        if (!s || !s.portals) return prev;
-        var _m = s.portals instanceof Map ? new Map(s.portals) : new Map(Object.entries(s.portals));
-        return { map: _m };
-    },
-    createPortal, function(prev, ev) {
-        if (!ev || !ev.name) return prev;
-        if ([...prev.map.values()].some(function(p) { return p.name === ev.name; })) return prev;
-        var _pid = uid('p');
-        prev.map.set(_pid, { id: _pid, name: ev.name, meta: ev });
-        return { map: prev.map };
-    },
-    updatePortal, function(prev, ev) {
-        if (!ev || !ev.id) return prev;
-        var _p = prev.map.get(ev.id);
-        if (!_p) return prev;
-        var _newMeta = Object.assign({}, _p.meta || {}, ev);
-        delete _newMeta.id;
-        prev.map.set(ev.id, Object.assign({}, _p, { meta: _newMeta }));
-        return { map: prev.map };
-    }
-);
-const portalLinks = Behaviors.select(
-    { map: new Map() },
-    Events.once(worldState), function(prev, s) {
-        if (!s || !s.portalLinks) return prev;
-        var _m = s.portalLinks instanceof Map ? new Map(s.portalLinks) : new Map(Object.entries(s.portalLinks));
-        return { map: _m };
-    },
-    createLink, function(prev, ev) {
-        if (!ev || !ev.toSelo || !ev.toPortalName) return prev;
-        var _fromPortalId = ev.fromPortalId;
-        if (!_fromPortalId || _fromPortalId === '__pending__') {
-            if (!ev.fromPortalName) return prev;
-            var _fp = [...portals.map.values()].find(function(p) { return p.name === ev.fromPortalName; });
-            if (!_fp) return prev;
-            _fromPortalId = _fp.id;
-        }
-        var _dup = [...prev.map.values()].some(function(l) {
-            return l.fromPortalId === _fromPortalId && l.toSelo === ev.toSelo && l.toPortalName === ev.toPortalName;
-        });
-        if (_dup) return prev;
-        var _lid = uid('link');
-        prev.map.set(_lid, { id: _lid, fromPortalId: _fromPortalId, toSelo: ev.toSelo, toPortalName: ev.toPortalName });
-        return { map: prev.map };
-    }
-);
-// spawned — mirrors world.app pattern: createLink arm spawns portal child VMs.
-const spawned = Behaviors.select(
-    [],
-    Events.once(worldState), function(prev, s) {
-        if (!s || !s.spawned) return prev;
-        return Array.isArray(s.spawned) ? s.spawned.slice() : prev;
-    },
-    createLink, function(prev, ev) {
-        if (!ev || !ev.toSelo || !ev.toPortalName) return prev;
-        var _fromPortalId = ev.fromPortalId;
-        if (!_fromPortalId || _fromPortalId === '__pending__') {
-            if (!ev.fromPortalName) return prev;
-            var _fp2 = [...portals.map.values()].find(function(p) { return p.name === ev.fromPortalName; });
-            if (!_fp2) return prev;
-            _fromPortalId = _fp2.id;
-        }
-        var _link = [...portalLinks.map.values()].find(function(l) {
-            return l.fromPortalId === _fromPortalId && l.toSelo === ev.toSelo && l.toPortalName === ev.toPortalName;
-        });
-        if (!_link) return prev;
-        var _windowName = _link.id + '-' + ev.toSelo;
-        var _next = prev.slice();
-        _next.push({ windowName: _windowName, seloId: ev.toSelo, linkId: _link.id, fromPortalId: _fromPortalId, isPortal: true });
-        return _next;
-    }
-);
 
 // _autoSetup: once on first worldState — creates portals, seeds _tick ONLY on :b
 const _autoSetup = Behaviors.collect(false, Events.once(worldState), function(done, ws) {
     if (done) return true;
     // Guard: skip if portals already exist (snapshot restore) — check FRP node and worldState
     if (!ws) return true;
-    var _existingPortals = portals.map.size > 0
-        || (ws.portals instanceof Map ? ws.portals.size : Object.keys(ws.portals || {}).length) > 0;
-    if (_existingPortals) return true;
+    if (portals.map.size > 0) return true; // already initialised (snapshot restore)
     if (seloId.indexOf(':a') >= 0) {
         portal_create({ name: 'view-a', offset: 0 });
         portal_link({
@@ -1745,7 +1424,7 @@ const _tickLoop = Behaviors.collect(null, _tick, function(_, __) {
     if (seloId.indexOf(':b') >= 0) {
         var _pt = [...portals.map.values()][0];
         if (_pt) {
-            var _cur = (_pt.meta && _pt.meta.offset != null) ? _pt.meta.offset : 0;
+            var _cur = _pt.offset != null ? _pt.offset : 0;
             portal_update({ id: _pt.id, offset: _cur + 1 });
         }
     }
@@ -1757,7 +1436,7 @@ const _tickLoop = Behaviors.collect(null, _tick, function(_, __) {
 const _logPos = Behaviors.collect(null, Events.change(portals), function(_, pts) {
     var _m = pts && pts.map instanceof Map ? pts.map : (pts instanceof Map ? pts : new Map());
     var _off = [..._m.values()].map(function(p) {
-        return p.name + '@' + ((p.meta || {}).offset || 0);
+        return p.name + '@' + (p.offset != null ? p.offset : (p.meta && p.meta.offset) || 0);
     }).join(', ');
     if (_off) console.log('[' + (Renkon.app.seloId || '?') + '] portals:', _off);
     return null;
@@ -1784,7 +1463,7 @@ const _statusSync = Behaviors.collect(null,
         var _pm = portals && portals.map instanceof Map ? portals.map : new Map();
         if (el) el.textContent = (Renkon.app.seloId || '?') +
             ' | portals: ' + [..._pm.values()].map(function(p) {
-                return p.name + '@' + ((p.meta || {}).offset || 0);
+                return p.name + '@' + (p.offset != null ? p.offset : (p.meta && p.meta.offset) || 0);
             }).join(', ');
         return null;
     }
@@ -1841,7 +1520,7 @@ const subCounter = Behaviors.collect(
 // createNamedPortal and createLink are handled by FRP receivers in world.app's portals/portalLinks/spawned nodes.
 const _autoSetup = Behaviors.collect(false, Events.once(worldState), function(done, ws) {
     if (done) return true;
-    if (!ws || (ws.portals instanceof Map ? ws.portals.size : Object.keys(ws.portals || {}).length) > 0) return true;
+    if (!ws || portals.map.size > 0) return true;
 
     if (seloId.indexOf(':source') >= 0) {
         var _targetSelo = seloId.replace(':source', ':target');
@@ -1894,21 +1573,13 @@ const _autoSetup = Behaviors.collect(false, Events.once(worldState), function(do
     },
 };
 
-// Wire portal-grid and portal-demo to world's programs
-if (APPS['world']) {
-    if (APPS['portal-grid']) {
-        APPS['portal-grid'].viewProgram = APPS['world'].viewProgram;
-    }
-    if (APPS['portal-demo']) {
-        // portal-demo reuses world's full model + view stack so avatar logic,
-        // window/portal Behaviors, and view rendering are not duplicated.
-        // portal-demo.app only carries its own extra nodes (counter, _autoSetup, etc.).
-        APPS['portal-demo'].viewProgram = APPS['world'].viewProgram;
-        APPS['portal-demo'].modelNodes  = APPS['world'].modelNodes.concat(
-            ['ticking', 'counter', 'randomResult', 'tick', 'subTick', 'subCounter', '_autoSetup']
-        );
-        APPS['portal-demo'].app = APPS['world'].app + '\n' + APPS['portal-demo'].app;
-    }
+// Extend portal-demo with world's unified app string and modelNodes.
+// krestianify handles the full model/view split for both apps combined.
+if (APPS['world'] && APPS['portal-demo']) {
+    APPS['portal-demo'].modelNodes = APPS['world'].modelNodes.concat(
+        ['ticking', 'counter', 'randomResult', 'tick', 'subTick', 'subCounter', '_autoSetup']
+    );
+    APPS['portal-demo'].app = APPS['world'].app + '\n' + APPS['portal-demo'].app;
 }
 
 // ── installDOMHandlers ────────────────────────────────────────────────────
