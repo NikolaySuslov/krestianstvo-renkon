@@ -1,6 +1,6 @@
 {
   "name": "krestianstvo-renkon",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Croquet-TeaTime-inspired, Renkon-driven collaborative computational engine",
   "type": "module",
   "exports": {
