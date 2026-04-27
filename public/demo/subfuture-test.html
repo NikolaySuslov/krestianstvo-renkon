@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Krestianstvo VM — Sub-future Chain Test</title>
+<style>
+  body { font-family: monospace; font-size: 12px; background: #111; color: #ddd; padding: 16px; }
+  h2   { color: #aef; margin: 0 0 8px; }
+  .row { display: flex; gap: 24px; }
+  .box { flex: 1; }
+  h3   { color: #8cf; margin: 8px 0 4px; font-size: 12px; }
+  #logA, #logB { white-space: pre; line-height: 1.5; max-height: 420px; overflow-y: auto; }
+  button { margin: 8px 4px 8px 0; padding: 6px 16px; background: #223; color: #aef;
+           border: 1px solid #448; border-radius: 4px; cursor: pointer; font-family: monospace; }
+  button:hover { background: #335; }
+  .pass { color: #4f4; } .fail { color: #f44; } .inf { color: #888; }
+  .hdr  { color: #fc8; } .vt   { color: #8cf; } .rt { color: #fa8; }
+</style>
+</head>
+<body>
+<h2>Sub-future Chain Test</h2>
+<p style="color:#888;margin:0 0 8px">Tests that future() calls from applyAction drain causally — all steps with serverTime ≤ heartbeatTime collapse in one real-time frame.</p>
+
+<div>
+  <button id="btnChain10">Chain 10 steps (1ms each)</button>
+  <button id="btnChain50">Chain 50 steps (1ms each)</button>
+  <button id="btnChain10slow">Chain 10 steps (60ms each)</button>
+  <button id="btnReset">Reset</button>
+</div>
+
+<div class="row">
+  <div class="box"><h3>vmA log</h3><div id="logA"></div></div>
+  <div class="box"><h3>vmB log</h3><div id="logB"></div></div>
+</div>
+
+<script type="module">
+import { KrestianstvoVM, parseUrlParams } from '../../index.js';
+
+const wsUrl = parseUrlParams('subfuture-test', 'ws://localhost:3000').reflector;
+
+// ── APPLY_ACTION ──────────────────────────────────────────────────────────────
+// Chains are driven entirely from applyAction so future() calls land in
+// _pendingFutures before the drain splice — the correct sub-tick path.
+// future(seconds, type, data) — vTime units are seconds, not ms!
+// For causality drain all steps must have serverTime <= heartbeatTime (~50ms window).
+// delaySec=0.001 (1ms) fits 50 steps inside one 50ms heartbeat.
+// delaySec=0.060 (60ms) exceeds heartbeat → one step per heartbeat → MULTI-FRAME.
+const APPLY_ACTION = `
+    if (msg.type === 'startChain') {
+        var steps = msg.data.steps || 10;
+        var delaySec = msg.data.delaySec != null ? msg.data.delaySec : 0.001;
+        future(delaySec, '_chainStep', { step: 0, steps: steps, delaySec: delaySec, startVt: state.time });
+        return { ...state, chainLog: [], chainDone: false };
+    }
+    if (msg.type === '_chainStep') {
+        var ev = msg.data;
+        var entry = { step: ev.step, vt: state.time, msgVt: app._vTime, startVt: ev.startVt };
+        var log = (state.chainLog || []).concat([entry]);
+        var done = ev.step >= ev.steps - 1;
+        if (!done) {
+            future(ev.delaySec, '_chainStep', { step: ev.step + 1, steps: ev.steps, delaySec: ev.delaySec, startVt: ev.startVt });
+        }
+        return { ...state, chainLog: log, chainDone: done };
+    }
+    if (msg.type === 'resetChain') {
+        return { ...state, chainLog: [], chainDone: false };
+    }
+`;
+
+// ── MODEL_PROGRAM ─────────────────────────────────────────────────────────────
+const MODEL_PROGRAM = `
+const chainLog  = Behaviors.collect((_initialState && _initialState.chainLog)  || [], Events.change(worldState), (_, s) => s ? (s.chainLog  || []) : []);
+const chainDone = Behaviors.collect((_initialState && _initialState.chainDone) || false, Events.change(worldState), (_, s) => s ? (s.chainDone || false) : false);
+`;
+
+// ── VIEW_PROGRAM ──────────────────────────────────────────────────────────────
+const VIEW_PROGRAM = `
+const chainLog  = Behaviors.collect([], Events.receiver(), (_, v) => v || []);
+const chainDone = Behaviors.collect(false, Events.receiver(), (_, v) => v || false);
+`;
+
+// ── Logging helpers ───────────────────────────────────────────────────────────
+function uiLog(el, msg, cls) {
+    var s = document.createElement('span');
+    s.className = cls || '';
+    s.textContent = msg + '\n';
+    el.appendChild(s);
+    el.scrollTop = el.scrollHeight;
+}
+
+function analyzeLog(el, label, log, prevRealT) {
+    if (!log || !log.length) return prevRealT;
+    var realT = Date.now();
+    var dt = prevRealT ? (realT - prevRealT) : 0;
+    uiLog(el, '--- chain update [' + label + '] realDt=' + dt + 'ms ---', 'hdr');
+    log.forEach(function(e) {
+        var vtDelta = (e.msgVt - e.startVt).toFixed(4);
+        uiLog(el, '  step ' + String(e.step).padStart(2) + '  msgVt=' + (e.msgVt||0).toFixed(4) + '  Δvt=+' + vtDelta, 'vt');
+    });
+    if (log.length > 1) {
+        var first = log[0].vt, last = log[log.length-1].vt;
+        var spread = (last - first).toFixed(3);
+        // vtSpread=0 means all steps share the same worldState.time = same heartbeat window.
+        // That IS the causality drain. realDt is not a valid indicator — it always includes
+        // at least one heartbeat period (~50ms) + network RTT regardless of chain length.
+        var oneBeat = spread === '0.000';
+        uiLog(el, '  steps=' + log.length + '  vtSpread=' + spread + 's  realDt=' + dt + 'ms  '
+            + (oneBeat ? '[PASS: one heartbeat]' : '[MULTI-FRAME: ' + spread + 's spread]'),
+            oneBeat ? 'pass' : 'fail');
+    }
+    return realT;
+}
+
+// ── Boot VMs ──────────────────────────────────────────────────────────────────
+function bootVM(logEl, label, seloId, delay) {
+    return new Promise(function(resolve) {
+        setTimeout(function() {
+            var vm = new KrestianstvoVM({ seloId: seloId, wsUrl: wsUrl });
+            vm.modelStateKeys = ['chainLog', 'chainDone'];
+            vm.start({
+                modelProgram: MODEL_PROGRAM,
+                viewProgram:  VIEW_PROGRAM,
+                applyAction:  APPLY_ACTION,
+            });
+            vm.onSeloJoined = function(ev) {
+                uiLog(logEl, label + ' joined ' + ev.seloId + ' as ' + ev.clientId, 'inf');
+                resolve(vm);
+            };
+        }, delay);
+    });
+}
+
+var prevRealA = 0, prevRealB = 0;
+
+async function main() {
+    var elA = document.getElementById('logA');
+    var elB = document.getElementById('logB');
+
+    var [vmA, vmB] = await Promise.all([
+        bootVM(elA, 'vmA', 'subfuture-test', 0),
+        bootVM(elB, 'vmB', 'subfuture-test', 200),
+    ]);
+    uiLog(elA, 'Both peers joined — ready', 'pass');
+
+    // Watch chainLog changes on viewPS for both VMs
+    function watchVM(vm, el, getRef) {
+        var prev = null;
+        setInterval(function() {
+            var n = (vm.viewPS.resolved && vm.viewPS.resolved.get('chainLog'))
+                 || (vm.viewPS.scratch  && vm.viewPS.scratch.get('chainLog'));
+            var v = n && n.value;
+            if (v && v !== prev && v.length > 0) {
+                prev = v;
+                var r = analyzeLog(el, '', v, getRef());
+                if (vm === vmA) prevRealA = r; else prevRealB = r;
+            }
+        }, 16);
+    }
+    watchVM(vmA, elA, function() { return prevRealA; });
+    watchVM(vmB, elB, function() { return prevRealB; });
+
+    function sendChain(steps, delaySec) {
+        [elA, elB].forEach(function(el) {
+            el.innerHTML = '';
+            uiLog(el, 'Starting chain: steps=' + steps + ' delaySec=' + delaySec + ' (' + (delaySec*1000).toFixed(1) + 'ms each, total=' + (steps*delaySec*1000).toFixed(1) + 'ms)', 'inf');
+        });
+        prevRealA = prevRealB = Date.now();
+        vmA.ws.send(JSON.stringify({ type: 'startChain', data: { steps: steps, delaySec: delaySec } }));
+    }
+
+    document.getElementById('btnChain10').onclick     = function() { sendChain(10, 0.001);  };
+    document.getElementById('btnChain50').onclick     = function() { sendChain(50, 0.001);  };
+    document.getElementById('btnChain10slow').onclick = function() { sendChain(10, 0.060);  };
+    document.getElementById('btnReset').onclick = function() {
+        [elA, elB].forEach(function(el) { el.innerHTML = ''; });
+        vmA.ws.send(JSON.stringify({ type: 'resetChain', data: {} }));
+    };
+}
+
+main().catch(console.error);
+</script>
+</body>
+</html>

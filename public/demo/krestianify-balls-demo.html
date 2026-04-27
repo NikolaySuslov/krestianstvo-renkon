@@ -28,7 +28,7 @@ html, body { width: 100%; height: 100%; background: #111; font-family: monospace
 <div id="stage">
   <div id="header">
     <h1>Krestianify — Balls Demo</h1>
-    <span class="hint">Click → spawn ball → auto-expires via <code>future(now(), 3000, 'expire', {id})</code> from inside Behaviors.collect</span>
+    <span class="hint">Click → spawn ball → auto-expires via <code>future(3, 'expire', {id})</code> from inside Behaviors.collect</span>
     <span class="hint" style="margin-left:auto">Two peers · same reflector</span>
   </div>
   <div id="vms">
@@ -53,7 +53,7 @@ import { selo } from '../index.js';
 // • balls  — model state: array of {id, x, y, r, color, spawnedAt}
 //            spawnedAt = now() (virtual time) — deterministic on all peers
 //
-// Demonstrates: future(now(), 3000, 'expire', ...) called from INSIDE
+// Demonstrates: future(3, 'expire', ...) called from INSIDE
 // a Behaviors.collect accumulator — previously broken, now supported.
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -74,7 +74,7 @@ const balls = Behaviors.collect([], Events.or(click, _tick), (prev, ev) => {
             if (ny - b.r < 0 || ny + b.r > 600) { vy = -vy; ny = b.y + vy; }
             return Object.assign({}, b, { x: nx, y: ny, vx: vx, vy: vy, fade: b.fade - 0.033 });
         }).filter(function(b) { return b.fade > 0; });
-        if (alive.length > 0) future(now(), 50, '_tick', { type: '_tick' });
+        if (alive.length > 0) future(0.05, '_tick', { type: '_tick' });
         return alive;
     }
 
@@ -86,7 +86,7 @@ const balls = Behaviors.collect([], Events.or(click, _tick), (prev, ev) => {
     var angle = random() * Math.PI * 2;
     var vx    = Math.cos(angle) * speed + (random() - 0.5) * 2;
     var vy    = Math.sin(angle) * speed + (random() - 0.5) * 2;
-    future(now(), 50, '_tick', { type: '_tick' });
+    future(0.05, '_tick', { type: '_tick' });
     return prev.concat({ id: id, x: ev.x, y: ev.y, r: r,
         color: 'hsl(' + hue + ',90%,50%)', vx: vx, vy: vy, fade: 1.0 });
 });

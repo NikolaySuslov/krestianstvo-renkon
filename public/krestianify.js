@@ -269,7 +269,7 @@ function krestianify(userCode, modelNodes) {
     //   - Replace declaration with Events.receiver()
     //   - Inject a _kfy_timerloop_<name> Behaviors.collect that:
     //       • On first fire (any event that could start things): seeds the future
-    //       • On each timer fire: reschedules future(now(), N, name, 1)
+    //       • On each timer fire: reschedules future(N, name, 1)
     //
     // The node fires exactly as Events.timer would — any model node depending
     // on it just works. The value delivered is 1 each tick (truthy counter).
@@ -280,21 +280,22 @@ function krestianify(userCode, modelNodes) {
         var m = d.code.match(/=\s*Events\.timer\s*\(\s*(\d+)\s*\)/);
         if (!m) return d;
         var interval = parseInt(m[1], 10);
+        var intervalSec = interval / 1000;  // convert ms → seconds (reflector uses seconds)
         var dn = JSON.stringify(d.name);
         var rn = '_kfy_timerstart_' + d.name;
         // Seed: fires once at model startup to kick off the chain.
         // Uses Events.receiver() with no sender — fires on model PS init (initial value).
         // Guard: checks queue so joiners don't double-seed.
         modelTimerLines.push(
-            '// kfy: Events.timer(' + interval + ') → future() self-chain\n' +
+            '// kfy: Events.timer(' + interval + 'ms) → future() self-chain\n' +
             'const _kfy_timerseed_' + d.name + ' = Behaviors.collect(false, Events.change(worldState), function(started, ws) {\n' +
             '    if (started || !ws) return started;\n' +
             '    var queued = (ws.queue || []).some(function(q) { return q.type === ' + dn + '; });\n' +
-            '    if (!queued) future(now(), ' + interval + ', ' + dn + ', 1);\n' +
+            '    if (!queued) future(' + intervalSec + ', ' + dn + ', 1);\n' +
             '    return true;\n' +
             '});\n' +
             'const ' + rn + ' = Behaviors.collect(false, ' + d.name + ', function(_, __) {\n' +
-            '    future(now(), ' + interval + ', ' + dn + ', 1);\n' +
+            '    future(' + intervalSec + ', ' + dn + ', 1);\n' +
             '    return true;\n' +
             '});'
         );

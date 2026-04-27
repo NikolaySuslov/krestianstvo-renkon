@@ -26,7 +26,7 @@ export function portalMount(rootEl) {
         if (!c) {
             c = document.createElement('div');
             c.className = 'vm-content';
-            c.style.cssText = 'position:absolute;top:30px;left:0;right:0;bottom:0;overflow:hidden;';
+            c.style.cssText = 'position:absolute;top:30px;left:0;right:0;bottom:0;overflow:hidden;z-index:1;';
             rootEl.appendChild(c);
         }
         return c;
@@ -55,7 +55,7 @@ const balls = Behaviors.collect([], Events.or(click, _tick), (prev, ev) => {
             if (ny - b.r < 0 || ny + b.r > 600) { vy = -vy; ny = b.y + vy; }
             return Object.assign({}, b, { x: nx, y: ny, vx: vx, vy: vy, fade: b.fade - 0.033 });
         }).filter(function(b) { return b.fade > 0; });
-        if (alive.length > 0) future(now(), 50, '_tick', { type: '_tick' });
+        if (alive.length > 0) future(0.05, '_tick', { type: '_tick' });
         return alive;
     }
 
@@ -67,7 +67,7 @@ const balls = Behaviors.collect([], Events.or(click, _tick), (prev, ev) => {
     var angle = random() * Math.PI * 2;
     var vx    = Math.cos(angle) * speed + (random() - 0.5) * 2;
     var vy    = Math.sin(angle) * speed + (random() - 0.5) * 2;
-    future(now(), 50, '_tick', { type: '_tick' });
+    future(0.05, '_tick', { type: '_tick' });
     return prev.concat({ id: id, x: ev.x, y: ev.y, r: r,
         color: 'hsl(' + hue + ',90%,50%)', vx: vx, vy: vy, fade: 1.0 });
 });
@@ -202,7 +202,7 @@ const subCounter = Behaviors.collect(
 // ── VIEW ───────────────────────────────────────────────────────────────────
 const toggleTick = Events.receiver();
 
-const _spaceKey = Behaviors.collect(false, Events.once(vTime), function(done, _) {
+const _spaceKey = Behaviors.collect(false, Events.change(vTime), function(done, _) {
     if (done) return true;
     var rEl = rootEl;
     if (!rEl) return false;
@@ -265,18 +265,18 @@ const _render = Behaviors.collect(null,
     applyAction: `
     if (msg.type === 'tick') {
         if (state.ticking) {
-            future(state.time, 1000, 'tick', {});
+            future(1, 'tick', {});
             Array.from({ length: 9 }, (_, i) => i + 1)
-                .forEach(i => future(state.time, i * 100, 'subTick', { step: i }));
+                .forEach(i => future(i * 0.1, 'subTick', { step: i }));
         }
         return state;
     }
     if (msg.type === 'toggleTick') {
         var _now = !state.ticking;
         if (_now) {
-            future(state.time, 1000, 'tick', {});
+            future(1, 'tick', {});
             Array.from({ length: 9 }, (_, i) => i + 1)
-                .forEach(i => future(state.time, i * 100, 'subTick', { step: i }));
+                .forEach(i => future(i * 0.1, 'subTick', { step: i }));
         }
         return Object.assign({}, state, { ticking: _now });
     }
@@ -335,36 +335,49 @@ const _renderColor = Behaviors.collect(null, color, (_, c) => {
 
 // ── counter-timer ─────────────────────────────────────
 APPS["counter-timer"] = {
-    modelNodes: ['counter', 'subCounter', 'running', '_tick', '_subTick', '_tickLoop'],
+    modelNodes: ['counter', 'subCounter', 'running', 'toggle', '_tick', '_subTick', '_tickLoop', '_autoStart'],
     app: `
 // ── MODEL ──────────────────────────────────────────────────────────────────
 
-// running — toggled by start/stop button, starts false
+// _autoStart: seed first tick on session init only if running is true
+const _autoStart = Behaviors.collect(false, Events.once(worldState), function(done, _) {
+    if (done) return true;
+    if (running) future(0.1, '_tick', { type: '_tick' });
+    return true;
+});
+
+// toggle — model receiver, fired by view send('toggle', {})
+const toggle = Events.receiver();
+
+// running — toggled by start/stop button, starts true (auto-started)
 const running = Behaviors.collect(false, toggle, (prev, _) => {
     var next = !prev;
-    if (next) future(now(), 1000, '_tick', { type: '_tick' });
+    if (next) future(0.001, '_tick', { type: '_tick' });
     return next;
 });
 
 // _tick — fires every 1s, schedules 9 subticks at 100ms intervals within the second
 const _tick    = Events.receiver();
-const _subTick = Events.receiver();
+const _subTick = Events.receiver({ queued: true });
 
 const _tickLoop = Behaviors.collect(null, _tick, (_, __) => {
     if (!running) return null;
-    future(now(), 1000, '_tick', { type: '_tick' });
-    Array.from({ length: 9 }, (_, i) => i + 1)
-     .forEach(i => future(now(), i * 100, '_subTick', { step: i }));
+    future(1, '_tick', { type: '_tick' });
+    Array.from({ length: 99 }, (_, i) => i + 1)
+     .forEach(i => future(i * 0.01, '_subTick', { step: i }));
 });
 
-// counter increments on each main tick
+// counter increments on each main tick (only when running)
 const counter = Behaviors.collect(0, Events.or(incr, decr, _tick), (prev, ev) => {
-    if (ev && ev.type === '_tick') return prev + 1;
+    if (ev && ev.type === '_tick') return running ? prev + 1 : prev;
     return prev + ev;
 });
 
-// subCounter increments on each subtick (9x per second when running)
-const subCounter = Behaviors.collect(0, _subTick, (prev, _) => prev + 1);
+// subCounter counts all subticks (queued batch) + main tick = 100 per second
+const subCounter = Behaviors.collect(0, Events.or(_tick, _subTick), (prev, ev) => {
+    if (Array.isArray(ev)) return prev + ev.length;
+    return prev + 1;
+});
 
 // ── VIEW ────────────────────────────────────────────────────────────────────
 
@@ -380,9 +393,9 @@ const _injectTimerStyles = Behaviors.collect(false, Events.once(vTime), function
     if (rootEl) rootEl.classList.add('k-timer-root');
     return true;
 });
-const incr   = Events.listener(rootEl.querySelector('#incr'),   'click', () => 1);
-const decr   = Events.listener(rootEl.querySelector('#decr'),   'click', () => -1);
-const toggle = Events.listener(rootEl.querySelector('#toggle'), 'click', () => 1);
+const incr         = Events.listener(rootEl.querySelector('#incr'),   'click', () => 1);
+const decr         = Events.listener(rootEl.querySelector('#decr'),   'click', () => -1);
+const _toggleSend  = Events.listener(rootEl.querySelector('#toggle'), 'click', () => { send('toggle', {}); });
 
 const _render = Behaviors.collect(null,
     Events.or(Events.change(counter), Events.change(subCounter), Events.change(running)),
@@ -404,9 +417,120 @@ const _render = Behaviors.collect(null,
             '<div style="display:flex;gap:12px;margin-top:8px">' +
             '<button id="incr"   style="font-size:28px;width:60px;height:60px;border-radius:10px;border:2px solid #aab;background:#fff;cursor:pointer">+</button>' +
             '<button id="decr"   style="font-size:28px;width:60px;height:60px;border-radius:10px;border:2px solid #aab;background:#fff;cursor:pointer">−</button>' +
-            '<button id="toggle" style="font-size:16px;width:80px;height:60px;border-radius:10px;border:2px solid #88b;background:#eef;cursor:pointer">Start</button>' +
+            '<button id="toggle" style="font-size:16px;width:80px;height:60px;border-radius:10px;border:2px solid #88b;background:#eef;cursor:pointer">Stop</button>' +
             '</div>' +
-            '<div style="font-size:11px;color:#aab">+1/s · 9 subticks/s · press Start</div>';
+            '<div style="font-size:11px;color:#aab">+1/s · 9 subticks/s</div>';
+        return mount;
+    },
+};
+
+
+// ── counter-timer2 ────────────────────────────────────────────────────────
+// Demonstrates FRP causality drain: future() called from Behaviors.collect
+// accumulators. Each subTick schedules the next one (chain pattern) so each
+// fires in a separate _makeSend drain loop iteration — plain receiver, no queued:true.
+APPS["counter-timer2"] = {
+    modelNodes: ['counter', 'subCounter', 'running', 'toggle', '_tick', '_subTick', '_subTickChain', '_tickLoop', '_autoStart', 'burstLog'],
+    app: `
+// ── MODEL ──────────────────────────────────────────────────────────────────
+
+const _autoStart = Behaviors.collect(false, Events.once(worldState), function(done, _) {
+    if (done) return true;
+    if (running) future(0.1, '_tick', { type: '_tick' });
+    return true;
+});
+
+const toggle  = Events.receiver();
+const running = Behaviors.collect(false, toggle, (prev, _) => {
+    var next = !prev;
+    if (next) future(0.001, '_tick', { type: '_tick' });
+    return next;
+});
+
+const _tick    = Events.receiver();
+const _subTick = Events.receiver();
+
+// _tickLoop: starts the subTick chain — only schedules step 1
+const _tickLoop = Behaviors.collect(null, _tick, (_, __) => {
+    if (!running) return null;
+    future(1, '_tick', { type: '_tick' });
+    future(0.01, '_subTick', { step: 1, steps: 99, startVt: now() });
+    return null;
+});
+
+// _subTickChain: each subTick schedules the next — one per drain loop iteration
+const _subTickChain = Behaviors.collect(null, _subTick, (_, ev) => {
+    if (!ev || ev.step >= ev.steps) return null;
+    future(0.01, '_subTick', { step: ev.step + 1, steps: ev.steps, startVt: ev.startVt });
+    return null;
+});
+
+const counter = Behaviors.collect(0, Events.or(incr, decr, _tick), (prev, ev) => {
+    if (ev && ev.type === '_tick') return running ? prev + 1 : prev;
+    return prev + ev;
+});
+
+const subCounter = Behaviors.collect(0, Events.or(_tick, _subTick), (prev, ev) => {
+    return prev + 1;
+});
+
+// burstLog: last 9 subTick entries — all from one chain, spread should be ~9ms
+const burstLog = Behaviors.collect([], _subTick, (prev, ev) => {
+    if (!ev) return prev;
+    var entry = { step: ev.step, msgVt: now(), startVt: ev.startVt };
+    var log = prev.concat([entry]);
+    return log.length > 99 ? log.slice(log.length - 99) : log;
+});
+
+// ── VIEW ────────────────────────────────────────────────────────────────────
+
+const _injectStyles = Behaviors.collect(false, Events.once(vTime), function(done, _) {
+    if (done) return true;
+    var sid = 'k-timer2-styles';
+    if (!document.getElementById(sid)) {
+        var s = document.createElement('style'); s.id = sid;
+        s.textContent = '.k-timer2-root{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;background:rgba(245,245,248,0.80);}';
+        document.head.appendChild(s);
+    }
+    if (rootEl) rootEl.classList.add('k-timer2-root');
+    return true;
+});
+
+const incr         = Events.listener(rootEl.querySelector('#incr'),   'click', () => 1);
+const decr         = Events.listener(rootEl.querySelector('#decr'),   'click', () => -1);
+const _toggleSend  = Events.listener(rootEl.querySelector('#toggle'), 'click', () => { send('toggle', {}); });
+
+const _render = Behaviors.collect(null,
+    Events.or(Events.change(counter), Events.change(subCounter), Events.change(running), Events.change(burstLog)),
+    (_, __) => {
+        var countEl  = rootEl.querySelector('#count');
+        var subEl    = rootEl.querySelector('#subcounter');
+        var toggleEl = rootEl.querySelector('#toggle');
+        var burstEl  = rootEl.querySelector('#burst');
+        if (countEl)  countEl.textContent  = counter;
+        if (subEl)    subEl.textContent    = 'sub: ' + subCounter;
+        if (toggleEl) toggleEl.textContent = running ? 'Stop' : 'Start';
+        if (burstEl && burstLog && burstLog.length >= 2) {
+            var first = burstLog[0].startVt || 0;
+            var last  = burstLog[burstLog.length - 1].msgVt || 0;
+            var spread = ((last - first) * 1000).toFixed(2);
+            burstEl.textContent = 'last burst: ' + burstLog.length + ' steps · spread: ' + spread + 'ms';
+        }
+        return null;
+    }
+);`,
+    buildUI: function(rootEl, label, _helpers) {
+        var mount = (_helpers && _helpers.portalMount || portalMount)(rootEl);
+        mount.innerHTML = '<div style="font-size:11px;color:#889;letter-spacing:1px">' + (label||'') + '</div>' +
+            '<div id="count" style="font-size:72px;font-weight:bold;color:#223;letter-spacing:-2px">0</div>' +
+            '<div id="subcounter" style="font-size:13px;color:#88a;margin-top:-8px">sub: 0</div>' +
+            '<div style="display:flex;gap:12px;margin-top:8px">' +
+            '<button id="incr"   style="font-size:28px;width:60px;height:60px;border-radius:10px;border:2px solid #aab;background:#fff;cursor:pointer">+</button>' +
+            '<button id="decr"   style="font-size:28px;width:60px;height:60px;border-radius:10px;border:2px solid #aab;background:#fff;cursor:pointer">−</button>' +
+            '<button id="toggle" style="font-size:16px;width:80px;height:60px;border-radius:10px;border:2px solid #88b;background:#eef;cursor:pointer">Stop</button>' +
+            '</div>' +
+            '<div id="burst" style="font-size:11px;color:#aab;min-height:16px">waiting for burst…</div>' +
+            '<div style="font-size:10px;color:#bbc">FRP chain drain · 99 subticks · 10ms each · plain receiver</div>';
         return mount;
     },
 };
@@ -420,7 +544,8 @@ APPS["world"] = {
                  'windows', '_moveWindow', '_resizeWindow', '_rotateWindow', '_applyWindowResize',
                  '_notifyLinkedResize', '_notifyLinkedRotate', '_notifyLinkedScale', '_notifyLinkedMove',
                  '_notifyLinkedPortalPos', '_notifyLinkedMirror',
-                 'setPortal', 'portalText'],
+                 'setPortal', 'portalText',
+                 '_setJoinInput', 'joinInput'],
     app: `
 // ── MODEL nodes: shared, deterministic, replicated ────────────────────────
 // windows, portals, portalLinks: use Behaviors.select for clean per-message dispatch
@@ -484,7 +609,7 @@ const windows = Behaviors.select(
     _resizeWindow,      function(prev, ev) {
         if (!ev || !ev.name) return prev;
         if (ev._injected) {
-            future(vTime, 0, '_applyWindowResize', { name: ev.name, w: ev.w, h: ev.h });
+            future(0, '_applyWindowResize', { name: ev.name, w: ev.w, h: ev.h });
             return prev; // deferred to _applyWindowResize for deterministic cross-world ordering
         }
         prev.map.set(ev.name, Object.assign({}, prev.map.get(ev.name) || {}, { w: ev.w, h: ev.h }));
@@ -603,6 +728,11 @@ const setPortal  = Events.receiver();
 const portalText = Behaviors.collect('', setPortal,
     function(_, ev) { return (ev && typeof ev === 'object') ? (ev.value || '') : (ev || ''); });
 
+// joinInput — synced join input value; { name: windowName, value } so renderer finds the right cinp.
+const _setJoinInput = Events.receiver();
+const joinInput = Behaviors.collect(null, _setJoinInput,
+    function(_, ev) { return (ev && ev.name != null) ? ev : null; });
+
 /// ── VIEW nodes: local per-client ──────────────────────────────────────────
 // windows, portalText — auto-generated as cross-boundary receivers by krestianify
 
@@ -613,7 +743,7 @@ const portalText = Behaviors.collect('', setPortal,
 const _buildUI = Behaviors.collect(false, Events.once(vTime), function(done, _) {
     if (done) return true;
     var rEl = rootEl;
-    if (!rEl) return false;
+    if (!rEl || !UI) return false;
 
     if (UI && UI.injectStyles) UI.injectStyles();
 
@@ -643,7 +773,7 @@ const _buildUI = Behaviors.collect(false, Events.once(vTime), function(done, _) 
                 if (_fromPortal) send('createLink', { fromPortalId: _fromPortal.id, toSelo: parsed.toSelo, toPortalName: parsed.toPortalName, maxDepth: parsed.maxDepth });
                 else console.warn('[createLink] portal not found:', parsed.fromPortalName, 'available:', [..._localPortals.values()].map(function(p){return p.name;}));
             } else {
-                send('spawnSelo', { seloId: parsed.seloId, appName: parsed.appName || null, maxDepth: parsed.maxDepth });
+                send('spawnSelo', { seloId: parsed.seloId, appName: parsed.appName || null, maxDepth: parsed.maxDepth, wsUrl: parsed.wsUrl || null });
             }
         },
     });
@@ -693,7 +823,7 @@ const _makeSpawnHandler = function(parentEl, parentVM) {
         if (parentVM._childrenMap) {
             var _zKeys = [...parentVM._childrenMap.keys()];
             var _zIdx  = _zKeys.indexOf(windowName);
-            if (_zIdx >= 0) el.style.zIndex = 20 + _zIdx;
+            if (_zIdx >= 0) el.style.zIndex = 60 + _zIdx;
         }
 
         if (childVM._isPortal) {
@@ -708,7 +838,7 @@ const _makeSpawnHandler = function(parentEl, parentVM) {
         var _vmContent = document.createElement('div');
         _vmContent.className = 'vm-content';
         var _tbH = result.titleBar.offsetHeight || 22;
-        _vmContent.style.cssText = 'position:absolute;top:' + _tbH + 'px;left:0;right:0;bottom:0;overflow:hidden;';
+        _vmContent.style.cssText = 'position:absolute;top:' + _tbH + 'px;left:0;right:0;bottom:0;overflow:hidden;z-index:1;';
 
         // Set rootEl on child VM before appending to DOM — ensures MutationObserver
         // in _rebuildViewPSWhenReady finds rootEl already set when it fires.
@@ -717,6 +847,7 @@ const _makeSpawnHandler = function(parentEl, parentVM) {
             childVM.viewPS.app.UI     = UI;
         }
         childVM.viewAppExtra = Object.assign(childVM.viewAppExtra || {}, { rootEl: _vmContent, UI: UI });
+        el._joinInp = cinp;
 
         el.appendChild(_vmContent);
         el.addEventListener('mouseenter', function() { Renkon.app._activeWS = childVM.ws; });
@@ -738,6 +869,15 @@ const _makeSpawnHandler = function(parentEl, parentVM) {
             if (childEl) { childEl._destroyDrag?.(); childEl.remove(); }
         };
 
+        cinp.addEventListener('input', function(e) {
+            send('_setJoinInput', { name: windowName, value: e.target.value });
+        });
+        cinp.addEventListener('keydown', function(e) {
+            if (e.code !== 'Enter') return;
+            var newSeloId = cinp.value.trim();
+            if (!newSeloId) return;
+            send('_joinWindow', { name: windowName, seloId: newSeloId });
+        });
         cbtn.addEventListener('click', function(e) {
             e.stopPropagation();
             var newSeloId = cinp.value.trim();
@@ -748,7 +888,7 @@ const _makeSpawnHandler = function(parentEl, parentVM) {
         el._onSpawnSelo = function(inputVal) {
             var parsed = _parsePortalInput(inputVal);
             if (childVM.ws && childVM.ws.readyState === WebSocket.OPEN)
-                childVM.ws.send(JSON.stringify({ type: 'spawnSelo', data: { seloId: parsed.seloId, appName: parsed.appName || null, maxDepth: parsed.maxDepth } }));
+                childVM.ws.send(JSON.stringify({ type: 'spawnSelo', data: { seloId: parsed.seloId, appName: parsed.appName || null, maxDepth: parsed.maxDepth, wsUrl: parsed.wsUrl || null } }));
         };
     };
 };
@@ -851,30 +991,32 @@ const _sendMove = Behaviors.collect(null, Events.or(_mouseCoords, _clickDoc), fu
 // 'foo'     → open portal window connecting to existing selo 'foo'
 const _parsePortalInput = function(inputVal) {
     var v = (inputVal || '').trim();
-    if (!v) return { seloId: '', appName: null, maxDepth: null, isPortal: false };
-    // Parse trailing options: ":d=5" sets maxDepth
+    if (!v) return { seloId: '', appName: null, maxDepth: null, wsUrl: null, isPortal: false };
+    // Parse :r=URL first — URL value may contain colons so it must be last in the string
+    var wsUrl = null;
+    var _rIdx = v.indexOf(':r=');
+    if (_rIdx >= 0) { wsUrl = v.slice(_rIdx + 3).trim() || null; v = v.slice(0, _rIdx).trim(); }
+    // Parse :d=N for maxDepth override
     var maxDepth = null;
-    // var _dMatch = v.match(/:d=(\d+)$/);
-    // if (_dMatch) { maxDepth = parseInt(_dMatch[1], 10); v = v.slice(0, v.lastIndexOf(':d=')).trim(); }
     var _dIdx = v.lastIndexOf(':d='); if (_dIdx >= 0) { var _dVal = v.slice(_dIdx + 3); if (_dVal && !isNaN(parseInt(_dVal, 10))) { maxDepth = parseInt(_dVal, 10); v = v.slice(0, _dIdx).trim(); } }
 
     // "portal:p1" — create a named portal rect in this selo
     if (v.indexOf('portal:') === 0) {
         var _pname = v.slice(7).trim();
-        return { action: 'createPortal', portalName: _pname, maxDepth: maxDepth };
+        return { action: 'createPortal', portalName: _pname, maxDepth: maxDepth, wsUrl: wsUrl };
     }
     // "link:p1->world:2/p2" — link local portal p1 to portal p2 in world:2
     // fromPortalName -> toSelo / toPortalName
     if (v.indexOf('link:') === 0) {
         var _spec = v.slice(5).trim();
         var _arrowIdx = _spec.indexOf('->');
-        if (_arrowIdx < 0) return { seloId: v, appName: null, maxDepth: maxDepth, isPortal: false };
+        if (_arrowIdx < 0) return { seloId: v, appName: null, maxDepth: maxDepth, wsUrl: wsUrl, isPortal: false };
         var _from = _spec.slice(0, _arrowIdx).trim();
         var _toSpec = _spec.slice(_arrowIdx + 2).trim();
         var _slashIdx = _toSpec.lastIndexOf('/');
         var _toSelo = _slashIdx >= 0 ? _toSpec.slice(0, _slashIdx).trim() : _toSpec;
         var _toPortal = _slashIdx >= 0 ? _toSpec.slice(_slashIdx + 1).trim() : '';
-        return { action: 'createLink', fromPortalName: _from, toSelo: _toSelo, toPortalName: _toPortal, maxDepth: maxDepth };
+        return { action: 'createLink', fromPortalName: _from, toSelo: _toSelo, toPortalName: _toPortal, maxDepth: maxDepth, wsUrl: wsUrl };
     }
     var resolve = Renkon.app && Renkon.app.resolveApp;
     if (resolve) {
@@ -882,22 +1024,22 @@ const _parsePortalInput = function(inputVal) {
         if (r && r.appDef) {
             var hasName = r.seloId && r.seloId.length > 0;
             var fullSeloId = hasName ? v : '';
-            return { seloId: fullSeloId, appName: r.appName, maxDepth: maxDepth, isPortal: false };
+            return { seloId: fullSeloId, appName: r.appName, maxDepth: maxDepth, wsUrl: wsUrl, isPortal: false };
         }
     }
     if (v.indexOf('new:') === 0) {
-        return { seloId: v.slice(4).trim(), appName: 'world', maxDepth: maxDepth, isPortal: false };
+        return { seloId: v.slice(4).trim(), appName: 'world', maxDepth: maxDepth, wsUrl: wsUrl, isPortal: false };
     }
     // Plain name with no app prefix — default to 'world' so the child gets
     // the full portal/avatar infrastructure. Joining an existing session is
     // unaffected: the snapshot arrives and programs are restored from it.
-    return { seloId: v, appName: 'world', maxDepth: maxDepth, isPortal: false };
+    return { seloId: v, appName: 'world', maxDepth: maxDepth, wsUrl: wsUrl, isPortal: false };
 };
 
 
 // ── renderer — 60hz DOM update ────────────────────────────────────────────
 const renderTick = Events.timer(16);
-const renderer = Behaviors.collect(null, renderTick, function(_, __) {
+const renderer = ((renderTick) => {
     var rEl  = rootEl;
     if (!rEl || !UI) return null;
     var objs    = (objects && objects.map) || new Map();
@@ -908,7 +1050,7 @@ const renderer = Behaviors.collect(null, renderTick, function(_, __) {
 
     var clockEl = rEl._clockEl;
     var peersEl = rEl._peersEl;
-    if (clockEl) clockEl.textContent = vTime || 0;
+    if (clockEl) clockEl.textContent = (+(vTime || 0)).toFixed(3);
     if (peersEl) peersEl.textContent = objs.size;
 
     var portalBar = rEl._portalBar;
@@ -918,6 +1060,12 @@ const renderer = Behaviors.collect(null, renderTick, function(_, __) {
         var pStr = (typeof portalText === 'object' && portalText !== null)
             ? (portalText.value || '') : (portalText || '');
         portalInp.value = pStr;
+    }
+
+    if (joinInput && joinInput.name) {
+        var _wEl = rEl.querySelector('[data-selo-id="' + joinInput.name + '"]');
+        var _jinp = _wEl && _wEl._joinInp;
+        if (_jinp && document.activeElement !== _jinp) _jinp.value = joinInput.value || '';
     }
 
     var layer = rEl._avatarLayer;
@@ -959,7 +1107,7 @@ const renderer = Behaviors.collect(null, renderTick, function(_, __) {
             tri = document.createElement('div');
             tri.className = 'av-tri';
             tri.style.cssText =
-                'width:30px;height:30px;' +
+                'width:30px;height:30px;pointer-events:none;' +
                 'clip-path: circle(40%);';
             el.appendChild(tri);
             el._avTri = tri;
@@ -975,7 +1123,7 @@ const renderer = Behaviors.collect(null, renderTick, function(_, __) {
     });
 
     return null;
-});
+})(renderTick);
 
 // ── _avatarLeftSync — remove departed avatar elements on clientLeft event ──
 const _avatarLeftSync = Behaviors.collect(null, Events.change(clientLeft), function(_, left) {
@@ -1376,7 +1524,7 @@ const _winSync = Behaviors.collect(null, Events.change(windows), function(_, _wi
 // All portal operations are available as model preamble functions:
 //   portal_create({ name, ...meta })        — createPortal
 //   portal_update({ id/name, ...meta })     — updatePortal (+ cross-VM notify)
-//   portal_delete({ id/name })              — deletePortal
+//   portal_delete({ id/name })              — closePortal
 //   portal_link({ fromPortalName, toSelo, toPortalName, maxDepth? })
 //   portal_unlink({ id })                   — deleteLink
 //   selo_spawn({ seloId, appName })
@@ -1409,7 +1557,7 @@ const _autoSetup = Behaviors.collect(false, Events.once(worldState), function(do
     }
     if (seloId.indexOf(':b') >= 0) {
         portal_create({ name: 'anchor-b', offset: 0 });
-        future(now(), 2000, '_tick', { type: '_tick' });
+        future(2, '_tick', { type: '_tick' });
     }
     return true;
 });
@@ -1420,7 +1568,7 @@ const _autoSetup = Behaviors.collect(false, Events.once(worldState), function(do
 const _tick = Events.receiver();
 
 const _tickLoop = Behaviors.collect(null, _tick, function(_, __) {
-    future(now(), 2000, '_tick', { type: '_tick' });
+    future(2, '_tick', { type: '_tick' });
     if (seloId.indexOf(':b') >= 0) {
         var _pt = [...portals.map.values()][0];
         if (_pt) {
@@ -1524,9 +1672,9 @@ const _autoSetup = Behaviors.collect(false, Events.once(worldState), function(do
 
     if (seloId.indexOf(':source') >= 0) {
         var _targetSelo = seloId.replace(':source', ':target');
-        future(ws.time, 0, 'createNamedPortal',
+        future(0, 'createNamedPortal',
             { name: 'src-view', x: 60, y: 60, w: 240, h: 180 });
-        future(ws.time, 5, 'createLink', {
+        future(0.005, 'createLink', {
             fromPortalId:   '__pending__',
             fromPortalName: 'src-view',
             toSelo:         _targetSelo,
@@ -1535,9 +1683,9 @@ const _autoSetup = Behaviors.collect(false, Events.once(worldState), function(do
     }
 
     if (seloId.indexOf(':target') >= 0) {
-        future(ws.time, 0, 'createNamedPortal',
+        future(0, 'createNamedPortal',
             { name: 'tgt-anchor', x: 80, y: 80, w: 240, h: 180 });
-        future(ws.time, 5, 'spawnSelo',
+        future(0.005, 'spawnSelo',
             { seloId: seloId + '-balls', appName: 'balls' });
     }
 
@@ -1585,12 +1733,20 @@ if (APPS['world'] && APPS['portal-demo']) {
 // ── installDOMHandlers ────────────────────────────────────────────────────
 // Sets viewAppExtra on a VM before boot. Replaces the dom-demo.js version.
 // resolveApp is optional — pass it so portal input can resolve named apps.
-export function installDOMHandlers(vm, rootEl, resolveApp) {
+// buildUI is optional — if provided, stored in viewAppExtra and called immediately.
+export function installDOMHandlers(vm, rootEl, resolveApp, buildUI) {
     vm.viewAppExtra = Object.assign(vm.viewAppExtra || {}, {
         rootEl:     rootEl,
         UI:         typeof KrestianstvoUI !== 'undefined' ? KrestianstvoUI : null,
         resolveApp: resolveApp || null,
     });
+    if (buildUI) {
+        vm.viewAppExtra._buildUI = buildUI;
+        try { buildUI(rootEl, vm.seloId || '', { portalMount: portalMount }); } catch(e) {}
+    }
+    if (typeof KrestianstvoUI !== 'undefined' && KrestianstvoUI.injectStyles) {
+        KrestianstvoUI.injectStyles();
+    }
 }
 
 // resolveApp(rawKey) — parse "appName:seloId" or plain "seloId"

@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Krestianstvo VM — Sub-future Chain Test (krestianify)</title>
+<style>
+  body { font-family: monospace; font-size: 12px; background: #111; color: #ddd; padding: 16px; }
+  h2   { color: #aef; margin: 0 0 8px; }
+  .row { display: flex; gap: 24px; }
+  .box { flex: 1; }
+  h3   { color: #8cf; margin: 8px 0 4px; font-size: 12px; }
+  #logA, #logB { white-space: pre; line-height: 1.5; max-height: 420px; overflow-y: auto; }
+  button { margin: 8px 4px 8px 0; padding: 6px 16px; background: #223; color: #aef;
+           border: 1px solid #448; border-radius: 4px; cursor: pointer; font-family: monospace; }
+  button:hover { background: #335; }
+  .pass { color: #4f4; } .fail { color: #f44; } .inf { color: #888; }
+  .hdr  { color: #fc8; } .vt   { color: #8cf; }
+</style>
+</head>
+<body>
+<h2>Sub-future Chain Test — krestianify version</h2>
+<p style="color:#888;margin:0 0 8px">future() called from Behaviors.collect FRP node. Tests the _makeSend causality drain loop for krestianified apps.</p>
+
+<div>
+  <button id="btnChain10">Chain 10 steps (1ms each)</button>
+  <button id="btnChain50">Chain 50 steps (1ms each)</button>
+  <button id="btnChain10slow">Chain 10 steps (60ms each)</button>
+  <button id="btnReset">Reset</button>
+</div>
+
+<div class="row">
+  <div class="box"><h3>vmA log</h3><div id="logA"></div></div>
+  <div class="box"><h3>vmB log</h3><div id="logB"></div></div>
+</div>
+
+<script type="module">
+import { KrestianstvoVM, krestianify, parseUrlParams } from '../../index.js';
+
+const wsUrl = parseUrlParams('subfuture-kfy-test', 'ws://localhost:3000').reflector;
+
+// ── Unified app — future() called from Behaviors.collect FRP nodes ────────────
+// _startChain and _chainStep are model receivers. The chain is entirely FRP-driven:
+// each _chainStep fires a Behaviors.collect that calls future() to schedule the next step.
+const APP = `
+const _startChain = Events.receiver();
+const _chainStep  = Events.receiver();
+
+// chainLog: accumulates entries as the chain progresses.
+// future() here is called from a Behaviors.collect — the krestianify / FRP path.
+const chainLog = Behaviors.collect([], Events.or(_startChain, _chainStep), (prev, ev) => {
+    if (!ev) return prev;
+    if (ev._start) {
+        future(ev.delaySec, '_chainStep', { step: 0, steps: ev.steps, delaySec: ev.delaySec, startVt: now() });
+        return [];
+    }
+    var entry = { step: ev.step, msgVt: now(), startVt: ev.startVt };
+    var log = prev.concat([entry]);
+    if (ev.step < ev.steps - 1) {
+        future(ev.delaySec, '_chainStep', {
+            step: ev.step + 1, steps: ev.steps, delaySec: ev.delaySec, startVt: ev.startVt
+        });
+    }
+    return log;
+});
+
+const chainDone = Behaviors.collect(false, Events.change(chainLog), (_, log) => {
+    if (!log || !log.length) return false;
+    var last = log[log.length - 1];
+    return last.step >= (last.steps != null ? last.steps - 1 : Infinity);
+});
+
+// ── VIEW ──────────────────────────────────────────────────────────────────────
+const _renderLog = Behaviors.collect(null, Events.change(chainLog), (_, log) => log);
+`;
+
+const MODEL_NODES = ['chainLog', 'chainDone', '_startChain', '_chainStep'];
+
+const compiled = krestianify(APP, MODEL_NODES);
+
+// ── Logging helpers ───────────────────────────────────────────────────────────
+function uiLog(el, msg, cls) {
+    var s = document.createElement('span');
+    s.className = cls || '';
+    s.textContent = msg + '\n';
+    el.appendChild(s);
+    el.scrollTop = el.scrollHeight;
+}
+
+function analyzeLog(el, log, prevRealT) {
+    if (!log || !log.length) return prevRealT;
+    var realT = Date.now();
+    var dt = prevRealT ? (realT - prevRealT) : 0;
+    uiLog(el, '--- chain update  realDt=' + dt + 'ms ---', 'hdr');
+    log.forEach(function(e) {
+        var vtDelta = ((e.msgVt || 0) - (e.startVt || 0)).toFixed(4);
+        uiLog(el, '  step ' + String(e.step).padStart(2) + '  msgVt=' + (e.msgVt||0).toFixed(4) + '  Δvt=+' + vtDelta, 'vt');
+    });
+    if (log.length > 1) {
+        var first = log[0].msgVt || 0;
+        var last  = log[log.length - 1].msgVt || 0;
+        var spread = (last - first).toFixed(4);
+        var oneBeat = parseFloat(spread) < 0.051;
+        uiLog(el,
+            '  steps=' + log.length + '  msgVtSpread=' + spread + 's  realDt=' + dt + 'ms  ' +
+            (oneBeat ? '[PASS: one heartbeat]' : '[MULTI-FRAME: ' + spread + 's spread]'),
+            oneBeat ? 'pass' : 'fail');
+    }
+    return realT;
+}
+
+// ── Boot VMs ──────────────────────────────────────────────────────────────────
+function bootVM(logEl, label, seloId, delay) {
+    return new Promise(function(resolve) {
+        setTimeout(function() {
+            var vm = new KrestianstvoVM({ seloId: seloId, wsUrl: wsUrl });
+            vm.modelStateKeys  = compiled.modelStateKeys;
+            vm.viewEchoExclude = compiled.viewToModel;
+            vm.start({
+                modelProgram: compiled.modelProgram,
+                viewProgram:  compiled.viewProgram,
+                applyAction:  compiled.applyAction || '',
+            });
+            vm.onSeloJoined = function(ev) {
+                uiLog(logEl, label + ' joined ' + ev.seloId + ' as ' + ev.clientId, 'inf');
+                resolve(vm);
+            };
+        }, delay);
+    });
+}
+
+var prevRealA = 0, prevRealB = 0;
+
+async function main() {
+    var elA = document.getElementById('logA');
+    var elB = document.getElementById('logB');
+
+    var [vmA, vmB] = await Promise.all([
+        bootVM(elA, 'vmA', 'subfuture-kfy-test', 0),
+        bootVM(elB, 'vmB', 'subfuture-kfy-test', 200),
+    ]);
+    uiLog(elA, 'Both peers joined — ready', 'pass');
+
+    function watchVM(vm, el, getRef) {
+        var prev = null;
+        setInterval(function() {
+            var n = (vm.viewPS.resolved && vm.viewPS.resolved.get('chainLog'))
+                 || (vm.viewPS.scratch  && vm.viewPS.scratch.get('chainLog'));
+            var v = n && n.value;
+            if (v && v !== prev && v.length > 0) {
+                prev = v;
+                var r = analyzeLog(el, v, getRef());
+                if (vm === vmA) prevRealA = r; else prevRealB = r;
+            }
+        }, 16);
+    }
+    watchVM(vmA, elA, function() { return prevRealA; });
+    watchVM(vmB, elB, function() { return prevRealB; });
+
+    function sendChain(steps, delaySec) {
+        [elA, elB].forEach(function(el) {
+            el.innerHTML = '';
+            uiLog(el, 'chain: steps=' + steps + '  delaySec=' + delaySec +
+                ' (' + (delaySec*1000).toFixed(1) + 'ms each, total=' +
+                (steps*delaySec*1000).toFixed(1) + 'ms)', 'inf');
+        });
+        prevRealA = prevRealB = Date.now();
+        vmA.ws.send(JSON.stringify({ type: '_startChain', data: { _start: true, steps: steps, delaySec: delaySec } }));
+    }
+
+    document.getElementById('btnChain10').onclick     = function() { sendChain(10, 0.001); };
+    document.getElementById('btnChain50').onclick     = function() { sendChain(50, 0.001); };
+    document.getElementById('btnChain10slow').onclick = function() { sendChain(10, 0.060); };
+    document.getElementById('btnReset').onclick = function() {
+        [elA, elB].forEach(function(el) { el.innerHTML = ''; });
+        prevRealA = prevRealB = 0;
+    };
+}
+
+main().catch(console.error);
+</script>
+</body>
+</html>

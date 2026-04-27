@@ -23,16 +23,16 @@ const APPLY_ACTION = `
     if (msg.type === 'toggleTick') {
         const nowTicking = !state.ticking;
         if (nowTicking) {
-            future(state.time, 1000, 'tick', {});
+            future(1, 'tick', {});
         }
         return { ...state, ticking: nowTicking };
     }
 
     if (msg.type === 'tick') {
         if (state.ticking) {
-            future(state.time, 1000, 'tick', {});
+            future(1, 'tick', {});
             for (var i = 1; i <= 9; i++) {
-                future(state.time, i * 100, 'subTick', { step: i });
+                future(i * 0.1, 'subTick', { step: i });
             }
         }
         const r = random();

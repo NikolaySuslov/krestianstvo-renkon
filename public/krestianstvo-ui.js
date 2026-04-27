@@ -12,7 +12,7 @@ const KrestianstvoUI = (() => {
 
     const C = {
         border:      'rgba(175,175,205,0.50)',
-        titleBg:     'rgba(226,226,242,0.80)',
+        titleBg:     'rgba(226,226,242,0.45)',
         titleBorder: 'rgba(188,188,215,0.52)',
         titleText:   '#445',
         statsBg:     'rgba(236,236,250,0.48)',
@@ -126,7 +126,7 @@ const KrestianstvoUI = (() => {
             'font-size:' + (isStats ? '9px' : '10px') + ';' +
             'font-weight:' + (isStats ? 'normal' : 'bold') + ';' +
             'color:' + (isStats ? C.statsText : C.titleText) + ';' +
-            'z-index:10;' + (opts.draggable ? 'cursor:move;' : '') +
+            'z-index:50;' + (opts.draggable ? 'cursor:move;' : '') +
             'user-select:none;touch-action:none;box-sizing:border-box;';
 
         // Close button first — left corner (macOS style), flat via CSS class
@@ -191,7 +191,7 @@ const KrestianstvoUI = (() => {
         if (opts.showStats) {
             const vmStats = document.createElement('span');
             vmStats.style.cssText = 'margin-left:auto;white-space:nowrap;flex-shrink:0;';
-            vmStats.innerHTML = 'T:<span class="vm-clock">-</span> P:<span class="vm-peers">-</span>';
+            vmStats.innerHTML = 'T:<span class="vm-clock" style="display:inline-block;min-width:5ch;text-align:right;">-</span> P:<span class="vm-peers">-</span>';
             bar.appendChild(vmStats);
             clockEl = vmStats.querySelector('.vm-clock');
             peersEl = vmStats.querySelector('.vm-peers');
@@ -215,7 +215,7 @@ const KrestianstvoUI = (() => {
             'background:rgba(255,255,255,0.40);' +
             'border:1.5px solid ' + C.border + ';' +
             'border-radius:6px;overflow:hidden;cursor:crosshair;' +
-            'z-index:20;outline:none;box-shadow:0 2px 16px rgba(0,0,80,0.13);';
+            'z-index:60;outline:none;box-shadow:0 2px 16px rgba(0,0,80,0.13);';
 
         const tbResult = createVMTitleBar(el, {
             name,
@@ -372,7 +372,7 @@ const KrestianstvoUI = (() => {
             'display:flex;align-items:center;gap:4px;' +
             'padding:0 20px 0 26px;' +  /* clear rotate handle (22px left) and resize handle (14px right) */
             'background:' + C.statsBg + ';border-top:1px solid ' + C.statsBorder + ';' +
-            'z-index:20;box-sizing:border-box;';
+            'z-index:50;box-sizing:border-box;';
 
         const inp = document.createElement('input');
         inp.placeholder = disabled ? 'max depth reached' : 'selo / app:name';

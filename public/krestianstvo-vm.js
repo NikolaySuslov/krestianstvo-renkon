@@ -64,13 +64,13 @@ const _vmFnToConst = (name, fn) => {
 // ENGINE — stringified into model preamble
 // ═══════════════════════════════════════════════════════════════════════════
 
-const _vm_future = (currentTime, ms, type, data) => {
+const _vm_future = (seconds, type, data) => {
     data = data || {};
     const msg = { type, data, from: '_future',
-                  serverTime: currentTime + ms, _future: true };
+                  serverTime: (app._vTime || 0) + seconds, _future: true };
     _pendingFutures.push(msg);
-    //console.log('%c⏳ FUTURE scheduled', 'color:#f90;font-weight:bold',
-    //    type, '| fires@' + msg.serverTime, '| now=' + currentTime, '| in+' + ms + 'ms');
+    console.log('%c⏳ FUTURE scheduled', 'color:#f90;font-weight:bold',
+        type, '| fires@' + msg.serverTime, '| now=' + (app._vTime||0), '| in+' + seconds + 's');
 };
 
 const _vm_enqueue = (state, ev) => {
@@ -122,7 +122,7 @@ const _vm_drain = (s) => {
     // Update _vTime to the exact serverTime of the message being drained so
     // now() returns the correct non-quantised time inside applyAction accumulators.
     if (app._vTime !== undefined) app._vTime = msg.serverTime;
-    //console.log('[drain] msg.type=' + msg.type + ' serverTime=' + msg.serverTime + ' _future=' + !!msg._future + ' now()=' + app._vTime);
+    console.log('[drain] msg.type=' + msg.type + ' serverTime=' + msg.serverTime + ' _future=' + !!msg._future + ' now()=' + app._vTime);
     const next = applyAction(s, msg);
     if (!next) { console.error('[drain] applyAction returned null for', msg.type); return s; }
     next._rngState = [_rngRef[0], _rngRef[1], _rngRef[2], _rngRef[3]];
@@ -197,7 +197,7 @@ const _vm_applyAction_portal = (state, msg) => {
         var _portalsMap = (_pv && _pv.map instanceof Map) ? _pv.map : new Map();
         var _pid = _d.id || ([..._portalsMap.values()].find(function(p) { return p.name === _d.name; }) || {}).id;
         if (!_pid) return state;
-        future(state.time, 0, '_notifyPortalUpdate', { portalId: _pid });
+        future(0, '_notifyPortalUpdate', { portalId: _pid });
         return state;
     }
 
@@ -418,10 +418,10 @@ const clientLeft   = Behaviors.collect([], Events.change(_clientDiff), (_, d) =>
         'const scalePortal       = Events.receiver();',
         'const createLink        = Events.receiver();',
         'const deleteLink        = Events.receiver();',
-        'const _rotateLinkPortal = Events.receiver();',
-        'const _scaleLinkPortal  = Events.receiver();',
-        'const _moveLinkPortal   = Events.receiver();',
-        'const _setLinkMirror   = Events.receiver();',
+        'const _rotateLinkPortal = Events.receiver({ queued: true });',
+        'const _scaleLinkPortal  = Events.receiver({ queued: true });',
+        'const _moveLinkPortal   = Events.receiver({ queued: true });',
+        'const _setLinkMirror    = Events.receiver({ queued: true });',
         'const spawnSelo         = Events.receiver();',
         'const _joinWindow       = Events.receiver();',
         'const _closeWindow      = Events.receiver();',
@@ -476,8 +476,10 @@ const clientLeft   = Behaviors.collect([], Events.change(_clientDiff), (_, d) =>
         return { map: prev.map };
     },
     closePortal, function(prev, ev) {
-        if (!ev || !ev.id) return prev;
-        prev.map.delete(ev.id);
+        if (!ev) return prev;
+        var _pid = ev.id || ([...prev.map.values()].find(function(p) { return p.name === ev.name; }) || {}).id;
+        if (!_pid) return prev;
+        prev.map.delete(_pid);
         return { map: prev.map };
     });`,
         `const portalLinks = Behaviors.select(
@@ -510,28 +512,42 @@ const clientLeft   = Behaviors.collect([], Events.change(_clientDiff), (_, d) =>
         return { map: prev.map };
     },
     closePortal, function(prev, ev) {
-        if (!ev || !ev.id) return prev;
-        prev.map.forEach(function(l, lid) { if (l.fromPortalId === ev.id) prev.map.delete(lid); });
+        if (!ev) return prev;
+        var _pid = ev.id || ([...portals.map.values()].find(function(p) { return p.name === ev.name; }) || {}).id;
+        if (!_pid) return prev;
+        prev.map.forEach(function(l, lid) { if (l.fromPortalId === _pid) prev.map.delete(lid); });
         return { map: prev.map };
     },
     _rotateLinkPortal, function(prev, ev) {
-        if (!ev || !ev.linkId || !prev.map.get(ev.linkId)) return prev;
-        prev.map.set(ev.linkId, Object.assign({}, prev.map.get(ev.linkId), { r: ev.r }));
+        var evs = Array.isArray(ev) ? ev : [ev];
+        evs.forEach(function(e) {
+            if (!e || !e.linkId || !prev.map.get(e.linkId)) return;
+            prev.map.set(e.linkId, Object.assign({}, prev.map.get(e.linkId), { r: e.r }));
+        });
         return { map: prev.map };
     },
     _scaleLinkPortal, function(prev, ev) {
-        if (!ev || !ev.linkId || !prev.map.get(ev.linkId)) return prev;
-        prev.map.set(ev.linkId, Object.assign({}, prev.map.get(ev.linkId), { s: ev.s }));
+        var evs = Array.isArray(ev) ? ev : [ev];
+        evs.forEach(function(e) {
+            if (!e || !e.linkId || !prev.map.get(e.linkId)) return;
+            prev.map.set(e.linkId, Object.assign({}, prev.map.get(e.linkId), { s: e.s }));
+        });
         return { map: prev.map };
     },
     _moveLinkPortal, function(prev, ev) {
-        if (!ev || !ev.linkId || !prev.map.get(ev.linkId)) return prev;
-        prev.map.set(ev.linkId, Object.assign({}, prev.map.get(ev.linkId), { x: ev.x, y: ev.y }));
+        var evs = Array.isArray(ev) ? ev : [ev];
+        evs.forEach(function(e) {
+            if (!e || !e.linkId || !prev.map.get(e.linkId)) return;
+            prev.map.set(e.linkId, Object.assign({}, prev.map.get(e.linkId), { x: e.x, y: e.y }));
+        });
         return { map: prev.map };
     },
     _setLinkMirror, function(prev, ev) {
-        if (!ev || !ev.linkId || !prev.map.get(ev.linkId)) return prev;
-        prev.map.set(ev.linkId, Object.assign({}, prev.map.get(ev.linkId), { hasMirror: ev.hasMirror }));
+        var evs = Array.isArray(ev) ? ev : [ev];
+        evs.forEach(function(e) {
+            if (!e || !e.linkId || !prev.map.get(e.linkId)) return;
+            prev.map.set(e.linkId, Object.assign({}, prev.map.get(e.linkId), { hasMirror: e.hasMirror }));
+        });
         return { map: prev.map };
     });`,
         `const spawned = Behaviors.select(
@@ -541,12 +557,13 @@ const clientLeft   = Behaviors.collect([], Events.change(_clientDiff), (_, d) =>
         return Array.isArray(s.spawned) ? s.spawned.slice() : prev;
     },
     spawnSelo, function(prev, ev) {
-        if (!ev || (!ev.seloId && !ev.appName)) return prev;
-        var _seloId = ev.seloId || uid(ev.appName || 'child');
-        var _windowName = uid('w') + '-' + _seloId;
+        if (!ev || (!ev.seloId && !ev.appName && !ev.name)) return prev;
+        var _seloId = ev.seloId || ev.name || uid(ev.appName || 'child');
+        var _windowName = ev.windowName || (ev.name ? ev.name : uid('w') + '-' + _seloId);
+        if (prev.some(function(e) { return (typeof e === 'object' ? e.windowName : e) === _windowName; })) return prev;
         var _maxDepth = (ev.maxDepth != null) ? ev.maxDepth : null;
         var _next = prev.slice();
-        _next.push({ windowName: _windowName, seloId: _seloId, appName: ev.appName || null, maxDepth: _maxDepth });
+        _next.push({ windowName: _windowName, seloId: _seloId, appName: ev.appName || null, maxDepth: _maxDepth, wsUrl: ev.wsUrl || null });
         return _next;
     },
     createLink, function(prev, ev) {
@@ -573,8 +590,10 @@ const clientLeft   = Behaviors.collect([], Events.change(_clientDiff), (_, d) =>
         return prev.filter(function(e) { return !(e && e.linkId === ev.id); });
     },
     closePortal, function(prev, ev) {
-        if (!ev || !ev.id) return prev;
-        return prev.filter(function(e) { return !(e && e.isPortal && e.fromPortalId === ev.id); });
+        if (!ev) return prev;
+        var _pid = ev.id || ([...portals.map.values()].find(function(p) { return p.name === ev.name; }) || {}).id;
+        if (!_pid) return prev;
+        return prev.filter(function(e) { return !(e && e.isPortal && e.fromPortalId === _pid); });
     },
     _closeWindow, function(prev, ev) {
         if (!ev || !ev.name) return prev;
@@ -617,7 +636,7 @@ const clientLeft   = Behaviors.collect([], Events.change(_clientDiff), (_, d) =>
         '};',
 
         // ── Portal helper functions ─────────────────────────────────────
-        // Syntactic sugar: schedule portal messages via future(now(), 0, ...).
+        // Syntactic sugar: schedule portal messages via future(0, ...).
         // Callable from any model combinator without knowing the message type.
         // Usage inside Behaviors.collect:
         //   portal_create({ name: "p1", x: 80, y: 80, w: 100, h: 100 })
@@ -626,12 +645,12 @@ const clientLeft   = Behaviors.collect([], Events.change(_clientDiff), (_, d) =>
         //   portal_update({ name: "p1", offset: 42 })
         //   selo_spawn({ seloId: "child:1", appName: "balls" })
         //   inject(targetVM, msgType, data)
-        'const portal_create  = function(data) { future(now(), 0, "createPortal",  data); };',
-        'const portal_update  = function(data) { future(now(), 0, "updatePortal",  data); };',
-        'const portal_delete  = function(data) { future(now(), 0, "deletePortal",  data); };',
-        'const portal_link    = function(data) { future(now(), 0, "createLink",    data); };',
-        'const portal_unlink  = function(data) { future(now(), 0, "deleteLink",    data); };',
-        'const selo_spawn     = function(data) { future(now(), 0, "spawnSelo",     data); };',
+        'const portal_create  = function(data) { future(0, "createPortal",  data); };',
+        'const portal_update  = function(data) { future(0, "updatePortal",  data); };',
+        'const portal_delete  = function(data) { future(0, "closePortal",   data); };',
+        'const portal_link    = function(data) { future(0, "createLink",    data); };',
+        'const portal_unlink  = function(data) { future(0, "deleteLink",    data); };',
+        'const selo_spawn     = function(data) { future(0, "spawnSelo",     data); };',
         'const inject         = function(targetVM, type, data) { injectModelMessage(targetVM, type, data); };',
 
         // injectModelMessage — cross-world model msg without ws.send
@@ -879,11 +898,48 @@ const spawnedNames = Behaviors.collect(
     }
 );
 
-// children$ — reactive Map<name, KrestianstvoVM> managed by _diffChildren
+// spawnedDiff$ — pure diff: which entries were added / removed since last tick
+const spawnedDiff$ = Behaviors.collect(
+    { added: [], removed: [], names: [] },
+    Events.change(spawnedNames),
+    function(state, names) {
+        var getKey = function(e) { return (e && typeof e === 'object') ? e.windowName : e; };
+        var prevKeys = new Set(state.names.map(getKey));
+        var curKeys  = new Set(names.map(getKey));
+        return {
+            added:   names.filter(function(e) { return !prevKeys.has(getKey(e)); }),
+            removed: state.names.filter(function(e) { return !curKeys.has(getKey(e)); }),
+            names:   names,
+        };
+    }
+);
+
+// children$ — Map<windowName, KrestianstvoVM> updated reactively from spawnedDiff$
 const children$ = Behaviors.collect(
     new Map(),
-    Events.change(spawnedNames),
-    function(prev, names) { return Renkon.app.vm._diffChildren(prev, names); }
+    Events.change(spawnedDiff$),
+    function(map, diff) {
+        var vm   = Renkon.app.vm;
+        var getKey = function(e) { return (e && typeof e === 'object') ? e.windowName : e; };
+        var afterClose = diff.removed
+            .map(getKey)
+            .reduce(function(m, name) {
+                var child = m.get(name);
+                if (child) {
+                    console.log('[children$] closing:', name);
+                    child._destroy();
+                    if (vm.onClose) vm.onClose({ name: name });
+                }
+                m.delete(name);
+                return m;
+            }, new Map(map));
+        var next = diff.added
+            .map(function(entry) { return vm._spawnChild(entry); })
+            .filter(Boolean)
+            .reduce(function(m, item) { m.set(item.name, item.child); return m; }, afterClose);
+        vm._childrenMap = next;
+        return next;
+    }
 );
         }) + '\n';
     }
@@ -922,6 +978,20 @@ const children$ = Behaviors.collect(
             const seed = (Date.now() ^ (Math.random() * 0x100000000)) | 0;
             const selo = this._createModelSelo(0, {}, Object.assign({}, this.initialState || {}, { seed }));
             this.modelPS = selo.ps;
+            if (this._startsBlank) {
+                // Child VM (blank first-peer): evaluate once so CollectStream.created()
+                // fills resolved/scratch, then seed _modelStatePrev so _sendSnapshot
+                // has correct state before the first heartbeat triggers _makeSend.
+                selo.ps.evaluate(0);
+                var _self0 = this;
+                this._effectiveStateKeys.forEach(function(k) {
+                    var v = _self0._getModelNode(selo.ps, k);
+                    if (v !== undefined && selo.appRef) {
+                        selo.appRef._modelStatePrev = selo.appRef._modelStatePrev || {};
+                        selo.appRef._modelStatePrev[k] = v;
+                    }
+                });
+            }
             // Reset spawned children — new selo starts empty
             this.ps.registerEvent('_spawned', []);
             // Reset viewPS time-sensitive receivers so stale values from previous
@@ -936,7 +1006,6 @@ const children$ = Behaviors.collect(
             // First peer: goes live immediately without snapshot_apply — fire joined callbacks here
             this._joined = true;
             if (this.viewPS) this.viewPS.app._joined = true;
-            console.log('[_onSeloJoined first peer] _onJoinedCallback=', !!this._onJoinedCallback);
             if (this._onJoinedCallback) {
                 const cb = this._onJoinedCallback;
                 this._onJoinedCallback = null;
@@ -969,7 +1038,6 @@ const children$ = Behaviors.collect(
     // _onSnapshotApply — called from seloState reducer
     _onSnapshotApply(state, msg) {
         this._joined = true;  // signal: fully joined, safe for tests to proceed
-        console.log('[_onSnapshotApply] _onJoinedCallback=', !!this._onJoinedCallback);
         // Fire deferred onSpawn if set — child VM is now ready with snapshot applied
         if (this._onJoinedCallback) {
             const cb = this._onJoinedCallback;
@@ -1084,17 +1152,21 @@ const children$ = Behaviors.collect(
     // snap may be a real snapshot payload (from _onSnapshotApply) or {} (from
     // first-peer inherit path — no state to push yet).
     _rebuildViewPSWhenReady(snap) {
+        console.log("in rebuildViewPSWhenReady")
         snap = snap || {};
         const _self = this;
         const _rootEl0 = _self.viewAppExtra && _self.viewAppExtra.rootEl;
         if (_rootEl0) {
+            console.log("in _rootEl0")
             _self._buildDomFromSnap(_rootEl0, snap);
             //return;  // rootEl already available — no observer needed
         }
         const observer = new window.MutationObserver((mutations, obs) => {
             const _rootEl = _self.viewAppExtra && _self.viewAppExtra.rootEl;
+            console.log("in observer")
             if (_rootEl) {
                 obs.disconnect();
+                console.log("in observer _rootEl")
                 _self._buildDomFromSnap(_rootEl, snap);
             }
         });
@@ -1103,7 +1175,7 @@ const children$ = Behaviors.collect(
 
     _buildDomFromSnap(_rootEl0, snap) {
          const _self = this;
-
+console.log("in _buildDomFromSnap")
                 // ── Build DOM ───────────────────────────────────────────────────────
         // VM is DOM-agnostic: it calls buildUI(rootEl, label) as an opaque callback.
         // buildUI may return a new mount element (e.g. a .vm-content wrapper for
@@ -1181,9 +1253,23 @@ const children$ = Behaviors.collect(
             (_livePeers ? [..._livePeers.keys()].sort() : []));
         _self.viewPS.registerEvent('clientJoined', []);
         _self.viewPS.registerEvent('clientLeft',   []);
-        _self.viewPS.registerEvent('vTime',        snap.time || 0);
+        var _vTimeToPush = snap.time || 0;
+        _self.viewPS.registerEvent('vTime', _vTimeToPush);
+        var _appRef = _self.modelPS && _self.modelPS.app;
         _self._effectiveStateKeys.forEach(function(k) {
-            if (snap[k] !== undefined) _self.viewPS.registerEvent(k, _self._resolveSnapVal(_self.modelPS, k, snap[k]));
+            // Prefer live model value — snap may be stale if observer fired after model advanced
+            var _liveVal = _self._getModelNode(_self.modelPS, k);
+            var _val = (_liveVal !== undefined)
+                ? _liveVal
+                : (snap[k] !== undefined ? _self._resolveSnapVal(_self.modelPS, k, snap[k]) : undefined);
+            if (_val !== undefined) {
+                _self.viewPS.registerEvent(k, _val);
+                // Sync _modelStatePrev baseline so _makeSend detects real future changes
+                if (_appRef) {
+                    _appRef._modelStatePrev = _appRef._modelStatePrev || {};
+                    _appRef._modelStatePrev[k] = _liveVal !== undefined ? _liveVal : _val;
+                }
+            }
         });
     }
 
@@ -1208,7 +1294,7 @@ const children$ = Behaviors.collect(
     }
 
     // _destroy — recursively tear down this VM and all its children.
-    // Called from _diffChildren when a child is removed from spawned[].
+    // Called from children$ reducer when a child is removed from spawned[].
     _destroy() {
         // Collect all clientIds before tearing down — used to update ancestor viewPSs.
         var _deadIds = this._collectClientIds();
@@ -1266,118 +1352,94 @@ const children$ = Behaviors.collect(
         } catch(e) {}
     }
 
-    // _children — Map of windowName → child VM (set by _diffChildren)
+    // _children — Map of windowName → child VM (managed by children$ reducer)
     // Accessible so view nodes can look up child VMs by portalId
     get _children() {
         // Return the current children map from the meta PS if available
         return this._childrenMap || new Map();
     }
 
-    // _diffChildren — called from children$ reducer
-    _diffChildren(prev, names) {
-        const next = new Map(prev);
-        names.forEach(entry => {
-            // entry is either a plain string (legacy) or { windowName, seloId }
-            const windowName   = (entry && typeof entry === 'object') ? entry.windowName : entry;
-            const targetSeloId = (entry && typeof entry === 'object') ? entry.seloId    : entry;
-            const _appName     = (entry && typeof entry === 'object') ? entry.appName   : null;
-            const _entryDepth  = (entry && typeof entry === 'object' && entry.maxDepth != null)
-                                 ? entry.maxDepth : null;
-            // Resolve appDef locally by appName — pass "appName:" so resolveApp finds the colon
-            const appDef = _appName && _appResolver
-                ? (_appResolver(_appName + ':') || {}).appDef || null : null;
-            const name = windowName; // key in the Map
-            if (next.has(name)) {
-                // If seloId changed (via _joinWindow), destroy old child and re-spawn
-                const existing = next.get(name);
-                if (existing && existing.seloId !== targetSeloId) {
-                    existing._destroy();
-                    next.delete(name);
-                    if (this.onClose) this.onClose({ name });
-                } else {
-                    return;
-                }
-            }
-            console.log('[children$] spawning:', name, '→ seloId:', targetSeloId, 'depth:', this.depth + 1);
-            if (this.depth + 1 > this.maxDepth) {
-                console.warn('[VM] max depth reached (' + this.maxDepth + '), not spawning:', name);
-                return;
-            }
-            const _childMaxDepth = _entryDepth != null ? _entryDepth : this.maxDepth;
-            const child = new KrestianstvoVM({ wsUrl: this.wsUrl, seloId: targetSeloId, depth: this.depth + 1, maxDepth: _childMaxDepth });
-            child._parent = this; // parent VM reference for chain traversal
-            child.modelStateKeys = this.modelStateKeys || [];
-            child.onClose = this.onClose;
-            // Tag portal/link child VMs so the portal renderer can find them
-            if (entry && typeof entry === 'object' && entry.isPortal) {
-                child._isPortal   = true;
-                child._windowName = windowName;
-                // Link-based portals use linkId; old pairing-based used portalId
-                if (entry.linkId)    child._linkId    = entry.linkId;
-                if (entry.portalId)  child._portalId  = entry.portalId;
-                child._portalAlreadyPaired = !!entry.alreadyPaired;
+    // _spawnChild — create, configure and start one child VM for a spawned entry.
+    // Returns { name, child } on success, null if depth limit reached.
+    _spawnChild(entry) {
+        const windowName   = (entry && typeof entry === 'object') ? entry.windowName : entry;
+        const targetSeloId = (entry && typeof entry === 'object') ? entry.seloId    : entry;
+        const _appName     = (entry && typeof entry === 'object') ? entry.appName   : null;
+        const _entryDepth  = (entry && typeof entry === 'object' && entry.maxDepth != null)
+                             ? entry.maxDepth : null;
+        const appDef = _appName && _appResolver
+            ? (_appResolver(_appName + ':') || {}).appDef || null : null;
 
-            }
-            const _parent = this;
-            const _spawnName  = windowName;   // pass windowName directly — no reverse lookup needed
-            const _spawnDepth = this.depth + 1;
-            // _onJoinedCallback: fires when child is fully joined.
-            child._onJoinedCallback = function() {
-                if (typeof _parent._registerChildVM === 'function') {
-                    _parent._registerChildVM(child);
-                }
-                if (typeof _parent.onSpawn === 'function') {
-                    _parent.onSpawn({ name: _spawnName, vm: child, depth: _spawnDepth });
-                }
-            };
-            // Child VMs start blank — they receive model+view programs from the
-            // snapshot of the target selo (joiner path). If the child becomes the
-            // first peer of a new selo (no snapshot), it inherits parent programs.
-            var _compiled = null;
-            var _useApp   = !!(appDef && appDef.app && _krestianify);
-            if (_useApp) {
-                try { _compiled = _krestianify(appDef.app, appDef.modelNodes || []); }
-                catch(e) { console.error('[_diffChildren] appDef compile failed:', e); _useApp = false; }
-            }
-            if (_useApp && _compiled) {
-                child.modelStateKeys  = _compiled.modelStateKeys;
-                child.viewEchoExclude = _compiled.viewToModel;
+        // Handle seloId change (via _joinWindow): destroy stale child first
+        if (this._childrenMap && this._childrenMap.has(windowName)) {
+            const existing = this._childrenMap.get(windowName);
+            if (existing && existing.seloId !== targetSeloId) {
+                existing._destroy();
+                this._childrenMap.delete(windowName);
+                if (this.onClose) this.onClose({ name: windowName });
             } else {
-                child.modelStateKeys  = (_parent.modelStateKeys || []).slice();
-                child.viewEchoExclude = _parent.viewEchoExclude || new Set();
+                return null; // already exists, no-op
             }
-            // Propagate resolveApp so child portal input can resolve named apps
-            if (_parent.viewAppExtra && _parent.viewAppExtra.resolveApp) {
-                child.viewAppExtra = Object.assign(child.viewAppExtra || {}, {
-                    resolveApp: _parent.viewAppExtra.resolveApp,
-                });
-            }
-            child._inheritedPrograms = {
-                modelProgram:    _useApp ? _compiled.modelProgram : (_parent._modelProgram || ''),
-                viewProgram:     _useApp ? (appDef.viewProgram || _compiled.viewProgram) : (_parent._viewProgram  || ''),
-                applyAction:     _useApp ? (appDef.applyAction || _compiled.applyAction || '') : (_parent._applyAction || ''),
-                modelStateKeys:  child.modelStateKeys.slice(),
-                viewEchoExclude: child.viewEchoExclude,
-                buildUI:         (_useApp && appDef.buildUI) ? appDef.buildUI
-                                 : (_parent.viewAppExtra && _parent.viewAppExtra._buildUI || null),
-            };
-            child.start({});
-            next.set(name, child);
-        });
-        // Build a set of current windowNames for O(1) lookup
-        const activeNames = new Set(names.map(e =>
-            (e && typeof e === 'object') ? e.windowName : e
-        ));
-        prev.forEach((child, name) => {
-            if (!activeNames.has(name)) {
-                console.log('[children$] closing:', name);
-                child._destroy();
-                next.delete(name);
-                if (this.onClose) this.onClose({ name });
-            }
-        });
-        this._childrenMap = next;
-        return next;
+        }
+
+        if (this.depth + 1 > this.maxDepth) {
+            console.warn('[VM] max depth reached (' + this.maxDepth + '), not spawning:', windowName);
+            return null;
+        }
+        console.log('[children$] spawning:', windowName, '→ seloId:', targetSeloId, 'depth:', this.depth + 1);
+
+        const _childMaxDepth = _entryDepth != null ? _entryDepth : this.maxDepth;
+        const _childWsUrl = (entry && typeof entry === 'object' && entry.wsUrl) ? entry.wsUrl : this.wsUrl;
+        const child = new KrestianstvoVM({ wsUrl: _childWsUrl, seloId: targetSeloId, depth: this.depth + 1, maxDepth: _childMaxDepth });
+        child._parent = this;
+        child.modelStateKeys = this.modelStateKeys || [];
+        child.onClose = this.onClose;
+
+        if (entry && typeof entry === 'object' && entry.isPortal) {
+            child._isPortal   = true;
+            child._windowName = windowName;
+            if (entry.linkId)   child._linkId   = entry.linkId;
+            if (entry.portalId) child._portalId = entry.portalId;
+            child._portalAlreadyPaired = !!entry.alreadyPaired;
+        }
+
+        const _parent    = this;
+        const _spawnName  = windowName;
+        const _spawnDepth = this.depth + 1;
+        child._onJoinedCallback = function() {
+            if (typeof _parent._registerChildVM === 'function') _parent._registerChildVM(child);
+            if (typeof _parent.onSpawn === 'function') _parent.onSpawn({ name: _spawnName, vm: child, depth: _spawnDepth });
+        };
+
+        var _compiled = null;
+        var _useApp   = !!(appDef && appDef.app && _krestianify);
+        if (_useApp) {
+            try { _compiled = _krestianify(appDef.app, appDef.modelNodes || []); }
+            catch(e) { console.error('[_spawnChild] appDef compile failed:', e); _useApp = false; }
+        }
+        if (_useApp && _compiled) {
+            child.modelStateKeys  = _compiled.modelStateKeys;
+            child.viewEchoExclude = _compiled.viewToModel;
+        } else {
+            child.modelStateKeys  = (_parent.modelStateKeys || []).slice();
+            child.viewEchoExclude = _parent.viewEchoExclude || new Set();
+        }
+        if (_parent.viewAppExtra && _parent.viewAppExtra.resolveApp) {
+            child.viewAppExtra = Object.assign(child.viewAppExtra || {}, {
+                resolveApp: _parent.viewAppExtra.resolveApp,
+            });
+        }
+        child._inheritedPrograms = {
+            modelProgram:    _useApp ? _compiled.modelProgram : (_parent._modelProgram || ''),
+            viewProgram:     _useApp ? (appDef.viewProgram || _compiled.viewProgram) : (_parent._viewProgram || ''),
+            applyAction:     _useApp ? (appDef.applyAction || _compiled.applyAction || '') : (_parent._applyAction || ''),
+            modelStateKeys:  child.modelStateKeys.slice(),
+            viewEchoExclude: child.viewEchoExclude,
+            buildUI:         (_useApp && appDef.buildUI) ? appDef.buildUI
+                             : (_parent.viewAppExtra && _parent.viewAppExtra._buildUI || null),
+        };
+        child.start({});
+        return { name: windowName, child };
     }
 
 
@@ -1529,6 +1591,38 @@ const children$ = Behaviors.collect(
                 }
             }
             psRef._ps.evaluate(t);
+
+            // Flush any futures scheduled during FRP (e.g. from Behaviors.collect
+            // accumulators calling future()). drain already ran so _pendingFutures were
+            // not spliced in — do it now by injecting them into the worldState queue.
+            // Then loop: if any flushed futures are ready (serverTime <= current vTime),
+            // re-trigger a drain pass by injecting a synthetic same-vTime heartbeat.
+            // This implements causality drain for krestianified apps where future() is
+            // called from FRP nodes rather than applyAction.
+            // IMPORTANT: this loop runs BEFORE modelStateKeys push so viewPS receives
+            // the complete final state after all causal chain steps are processed.
+            var _causalT = t;
+            var _causalIter = 0;
+            var _causalMax  = 300;
+            while (_causalIter++ < _causalMax) {
+                if (!psRef._pendingFutures || !psRef._pendingFutures.length) break;
+                var _frpFutures = psRef._pendingFutures.splice(0);
+                var _wsNode = (psRef._ps.resolved && psRef._ps.resolved.get('worldState'))
+                           || (psRef._ps.scratch  && psRef._ps.scratch.get('worldState'));
+                if (!_wsNode || !_wsNode.value) break;
+                _wsNode.value.queue = (_wsNode.value.queue || []).concat(_frpFutures);
+                // Check if any flushed futures are within the current causality window
+                var _hasReady = _wsNode.value.queue.some(function(m) { return m.serverTime <= _causalT; });
+                if (!_hasReady) break;
+                // Inject synthetic heartbeat at same vTime to re-trigger worldState drain
+                // without advancing virtual time. _enqueue spreads state (new ref) even when
+                // time is unchanged, which fires Events.change($worldState) → _drain recurses.
+                psRef._ps.registerEvent('_raw', { type: 'heartbeat', vTime: _causalT });
+                psRef._ps.evaluate(_causalT);
+                psRef._ps.evaluate(_causalT);
+                psRef._ps.evaluate(_causalT);
+            }
+
             // Push any modelStateKeys that changed vs baseline
             for (var _j = 0; _j < _keys.length; _j++) {
                 var _k2 = _keys[_j];
@@ -1551,19 +1645,6 @@ const children$ = Behaviors.collect(
                 var _spVal = _spNode && _spNode.value;
                 if (Array.isArray(_spVal) && _spVal !== _before['spawned']) {
                     psRef.metaPS.registerEvent('_spawned', _spVal.slice());
-                }
-            }
-
-            // Flush any futures scheduled during FRP (e.g. from Behaviors.collect
-            // accumulators calling future()). drain already ran so _pendingFutures were
-            // not spliced in — do it now by injecting them into the worldState queue.
-            if (psRef._pendingFutures && psRef._pendingFutures.length) {
-                var _frpFutures = psRef._pendingFutures.splice(0);  // appRef._pendingFutures
-                // Read current worldState node and append futures to its queue
-                var _wsNode = (psRef._ps.resolved && psRef._ps.resolved.get('worldState'))
-                           || (psRef._ps.scratch  && psRef._ps.scratch.get('worldState'));
-                if (_wsNode && _wsNode.value) {
-                    _wsNode.value.queue = (_wsNode.value.queue || []).concat(_frpFutures);
                 }
             }
             // Capture _rngRef AFTER full FRP — random() may be called in model

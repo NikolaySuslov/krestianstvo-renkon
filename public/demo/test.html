@@ -130,8 +130,8 @@ import { MODEL_PROGRAM, VIEW_PROGRAM, APPLY_ACTION } from './tests.js';
     // ── TEST 4 (+7.5s): peer tracking ─────────────────────────────────────
     setTimeout(() => {
         uiLog('--- TEST 4: peer tracking ---', 'inf');
-        const wsA = getWorldState(vmA, 'objects');
-        const wsB = getWorldState(vmB, 'objects');
+        const wsA = getWorldState(vmA, '_peers');
+        const wsB = getWorldState(vmB, '_peers');
         const keysA = wsA instanceof Map ? [...wsA.keys()] : Object.keys(wsA || {});
         const keysB = wsB instanceof Map ? [...wsB.keys()] : Object.keys(wsB || {});
         uiLog('vmA peers: ' + keysA.join(', '), 'inf');

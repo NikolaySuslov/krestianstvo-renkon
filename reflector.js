@@ -48,7 +48,7 @@ function createSelo(seloId) {
             { vTime: 0, isHb: true, ev: null, stamped: null },
             Events.or(hb, timeForImmediate),
             (_, ev) => {
-                const vTime = Date.now() - app.startTime;
+                const vTime = (Date.now() - app.startTime) / 1000;
                 const isHb  = typeof ev === 'number';
                 const stamped = isHb ? null : {
                     ...ev.data,
@@ -60,7 +60,7 @@ function createSelo(seloId) {
             }
         );
 
-        // vTime: wall-clock ms since selo start — same for HB and CM stamps.
+        // vTime: seconds since selo start — same for HB and CM stamps.
         const vTime = Behaviors.collect(0, hbOrClMsg, (_, c) => c.vTime);
 
         // ── Network messages (connect / disconnect / snapshot) ───────────────
@@ -100,7 +100,7 @@ function createSelo(seloId) {
                 if (ev.type === 'client_msg') {
                     if (ev.data?.type === 'snapshot_response') { last = null; continue; }
                     const stampedMessage = {
-                        ...ev.data, serverTime: Date.now() - app.startTime, from: ev.from, timestamp: ev.timestamp
+                        ...ev.data, serverTime: (Date.now() - app.startTime) / 1000, from: ev.from, timestamp: ev.timestamp
                     };
                     const selo = app.selos.get(app.seloId);
                     if (selo) {
@@ -234,8 +234,8 @@ function createSelo(seloId) {
             { lastTime: 0 },
             hb,
             (state, _) => {
-                const currentTime = hbOrClMsg ? hbOrClMsg.vTime : (Date.now() - app.startTime);
-                // Broadcast heartbeat every tick to advance virtual time
+                const currentTime = hbOrClMsg ? hbOrClMsg.vTime : (Date.now() - app.startTime) / 1000;
+                // Broadcast heartbeat every tick to advance virtual time — vTime in seconds
                 const syncData = {
                     type: 'heartbeat',
                     vTime: currentTime,
